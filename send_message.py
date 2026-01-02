@@ -1,15 +1,24 @@
-from telegram import Bot
+import requests
 
-# 🔹 Inserisci qui il token del tuo bot
+# 🔹 Inserisci qui il token del bot
 TOKEN = "IL_TUO_BOT_TOKEN"
 
-# 🔹 Inserisci l'ID del tuo canale (con -100 davanti se è privato)
-CHANNEL_ID = -1001234567890
+# 🔹 Inserisci l'ID del canale come stringa
+CHANNEL_ID = "-1001234567890"
 
-# Crea l'oggetto bot
-bot = Bot(token=TOKEN)
+# Messaggio da inviare
+TEXT = "✅ Messaggio di test inviato correttamente via HTTP!"
 
-# Invia il messaggio al canale
-bot.send_message(chat_id=CHANNEL_ID, text="✅ Messaggio di test inviato correttamente!")
+# Chiamata diretta alle API di Telegram
+url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
+payload = {
+    "chat_id": CHANNEL_ID,
+    "text": TEXT
+}
 
-print("Messaggio inviato con successo!")
+response = requests.post(url, data=payload)
+
+if response.status_code == 200:
+    print("Messaggio inviato con successo!")
+else:
+    print("Errore:", response.status_code, response.text)
