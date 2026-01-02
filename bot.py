@@ -1,37 +1,39 @@
-# pip install python-telegram-bot requests yfinance
+# pip install python-telegram-bot==13.14 requests yfinance
 from telegram import Update
 from telegram.ext import Updater, CommandHandler, CallbackContext
-import requests
 import yfinance as yf
+import requests
+import os
 
-# ======= CONFIGURE YOUR TOKEN HERE =======
-TOKEN = "YOUR_BOT_TOKEN"
+# ======= TOKEN FROM ENVIRONMENT =======
+TOKEN = os.environ.get("TELEGRAM_TOKEN")  # più sicuro su Render
 
-# ======= HELP FUNCTIONS =======
+# ======= HELP / START =======
 def start(update: Update, context: CallbackContext):
     update.message.reply_text("Hello! I am your intraday market bot. Use /help to see available commands.")
 
 def help_command(update: Update, context: CallbackContext):
     commands = """
-Available commands:
+/start - Start the bot
+/help - Show commands
 /forex_major - Major Forex pairs
 /forex_minor - Minor Forex pairs
 /forex_summary - Forex summary
-/gold - Gold
-/silver - Silver
+/gold - Gold price
+/silver - Silver price
 /commodities - Commodities overview
-/oil_wti - WTI
-/oil_brent - Brent
-/ngas - Natural Gas
+/oil_wti - WTI oil price
+/oil_brent - Brent oil price
+/ngas - Natural gas price
 /eia_report - Latest EIA report
-/macro_us - US macroeconomic data
-/macro_eu - EU macroeconomic data
+/macro_us - US macro news
+/macro_eu - EU macro news
 /macro_global - Global macro overview
 /market_news - Top market news
 /us_stocks - US stocks intraday
 /eu_stocks - EU stocks intraday
 /pre_market - US pre-market
-/earnings - Today's earnings
+/earnings - Today’s earnings
 /crypto_major - Major cryptocurrencies
 /crypto_summary - Crypto market overview
 """
@@ -39,21 +41,10 @@ Available commands:
 
 # ======= FOREX =======
 def forex_major(update: Update, context: CallbackContext):
-    message = """
-EUR/USD: 1.1599 (+0.03%)
-USD/JPY: 155.50 (+0.10%)
-GBP/USD: 1.3400 (-0.05%)
-USD/CHF: 0.9100 (+0.02%)
-"""
-    update.message.reply_text(message)
+    update.message.reply_text("EUR/USD: 1.1599 (+0.03%)\nUSD/JPY: 155.50 (+0.10%)\nGBP/USD: 1.3400 (-0.05%)\nUSD/CHF: 0.9100 (+0.02%)")
 
 def forex_minor(update: Update, context: CallbackContext):
-    message = """
-AUD/JPY: 102.50 (+0.08%)
-EUR/GBP: 0.8700 (+0.01%)
-NZD/USD: 0.6200 (-0.02%)
-"""
-    update.message.reply_text(message)
+    update.message.reply_text("AUD/JPY: 102.50 (+0.08%)\nEUR/GBP: 0.8700 (+0.01%)\nNZD/USD: 0.6200 (-0.02%)")
 
 def forex_summary(update: Update, context: CallbackContext):
     update.message.reply_text("Forex intraday: Market stable, EUR/USD slightly up...")
