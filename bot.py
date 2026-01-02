@@ -1,32 +1,27 @@
 import os
 import asyncio
-from flask import Flask
 from telegram import Bot
 
-TOKEN = os.getenv("TELEGRAM_TOKEN")  # Assicurati di aver impostato questa variabile su Render
-CHANNEL = "@xenosfinance"
+TOKEN = os.getenv("TELEGRAM_TOKEN")
+CHANNEL = "@xenosfinance"  # se hai il Chat ID numerico, meglio usarlo: -100xxxx
 
 bot = Bot(TOKEN)
 
 async def send_message(text):
     try:
         await bot.send_message(chat_id=CHANNEL, text=text)
+        print("Messaggio inviato al canale ✅")
     except Exception as e:
         print("Errore invio:", e)
 
 async def scheduler():
+    print("🤖 Scheduler avviato...")
     while True:
-        await send_message("Bot Xenosfinance attivo ✅ – test post automatico")
-        await asyncio.sleep(600)  # ogni 10 minuti
-
-app = Flask(__name__)
-
-@app.route("/")
-def home():
-    return "Xenos bot attivo!"
+        await send_message("🎁 Xenos Finance: TEMU shopping rally is powering PDD this December 🚀")
+        await asyncio.sleep(600)  # 10 minuti
 
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 5000))
-    loop = asyncio.get_event_loop()
-    loop.create_task(scheduler())
-    app.run(host="0.0.0.0", port=port)
+    if not TOKEN:
+        raise RuntimeError("❌ TELEGRAM_TOKEN non impostato nelle variabili d'ambiente!")
+
+    asyncio.run(scheduler())
