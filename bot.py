@@ -2,14 +2,13 @@
 try:
     import imghdr
 except ImportError:
-    # Crea un modulo fittizio per imghdr
     import sys
-    
+
     class FakeImghdr:
         @staticmethod
         def what(file, h=None):
             return None
-    
+
     sys.modules['imghdr'] = FakeImghdr()
     imghdr = FakeImghdr()
 
@@ -28,11 +27,13 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # ======= TOKEN FROM ENVIRONMENT =======
-TOKEN = os.environ.get("TELEGRAM_TOKEN")  # più sicuro su Render
+TOKEN = os.environ.get("TELEGRAM_TOKEN")
 
 # ======= HELP / START =======
 def start(update: Update, context: CallbackContext):
-    update.message.reply_text("Hello! I am your intraday market bot. Use /help to see available commands.")
+    update.message.reply_text(
+        "Hello! I am your intraday market bot. Use /help to see available commands."
+    )
 
 def help_command(update: Update, context: CallbackContext):
     commands = """
@@ -63,10 +64,14 @@ def help_command(update: Update, context: CallbackContext):
 
 # ======= FOREX =======
 def forex_major(update: Update, context: CallbackContext):
-    update.message.reply_text("EUR/USD: 1.1599 (+0.03%)\nUSD/JPY: 155.50 (+0.10%)\nGBP/USD: 1.3400 (-0.05%)\nUSD/CHF: 0.9100 (+0.02%)")
+    update.message.reply_text(
+        "EUR/USD: 1.1599 (+0.03%)\nUSD/JPY: 155.50 (+0.10%)\nGBP/USD: 1.3400 (-0.05%)\nUSD/CHF: 0.9100 (+0.02%)"
+    )
 
 def forex_minor(update: Update, context: CallbackContext):
-    update.message.reply_text("AUD/JPY: 102.50 (+0.08%)\nEUR/GBP: 0.8700 (+0.01%)\nNZD/USD: 0.6200 (-0.02%)")
+    update.message.reply_text(
+        "AUD/JPY: 102.50 (+0.08%)\nEUR/GBP: 0.8700 (+0.01%)\nNZD/USD: 0.6200 (-0.02%)"
+    )
 
 def forex_summary(update: Update, context: CallbackContext):
     update.message.reply_text("Forex intraday: Market stable, EUR/USD slightly up...")
@@ -186,35 +191,39 @@ def crypto_summary(update: Update, context: CallbackContext):
 
 # ======= BOT SETUP =======
 def main():
-    # OBBLIGATORIO: use_context=True per python-telegram-bot v13.x
     updater = Updater(TOKEN, use_context=True)
     dp = updater.dispatcher
 
-    # Command handler
-    dp.add_handler(CommandHandler("start", start))
-    dp.add_handler(CommandHandler("help", help_command))
-    dp.add_handler(CommandHandler("forex_major", forex_major))
-    dp.add_handler(CommandHandler("forex_minor", forex_minor))
-    dp.add_handler(CommandHandler("forex_summary", forex_summary))
-    dp.add_handler(CommandHandler("gold", gold))
-    dp.add_handler(CommandHandler("silver", silver))
-    dp.add_handler(CommandHandler("commodities", commodities))
-    dp.add_handler(CommandHandler("oil_wti", oil_wti))
-    dp.add_handler(CommandHandler("oil_brent", oil_brent))
-    dp.add_handler(CommandHandler("ngas", ngas))
-    dp.add_handler(CommandHandler("eia_report", eia_report))
-    dp.add_handler(CommandHandler("macro_us", macro_us))
-    dp.add_handler(CommandHandler("macro_eu", macro_eu))
-    dp.add_handler(CommandHandler("macro_global", macro_global))
-    dp.add_handler(CommandHandler("market_news", market_news))
-    dp.add_handler(CommandHandler("us_stocks", us_stocks))
-    dp.add_handler(CommandHandler("eu_stocks", eu_stocks))
-    dp.add_handler(CommandHandler("pre_market", pre_market))
-    dp.add_handler(CommandHandler("earnings", earnings))
-    dp.add_handler(CommandHandler("crypto_major", crypto_major))
-    dp.add_handler(CommandHandler("crypto_summary", crypto_summary))
+    # Registrazione comandi
+    commands = [
+        ("start", start),
+        ("help", help_command),
+        ("forex_major", forex_major),
+        ("forex_minor", forex_minor),
+        ("forex_summary", forex_summary),
+        ("gold", gold),
+        ("silver", silver),
+        ("commodities", commodities),
+        ("oil_wti", oil_wti),
+        ("oil_brent", oil_brent),
+        ("ngas", ngas),
+        ("eia_report", eia_report),
+        ("macro_us", macro_us),
+        ("macro_eu", macro_eu),
+        ("macro_global", macro_global),
+        ("market_news", market_news),
+        ("us_stocks", us_stocks),
+        ("eu_stocks", eu_stocks),
+        ("pre_market", pre_market),
+        ("earnings", earnings),
+        ("crypto_major", crypto_major),
+        ("crypto_summary", crypto_summary),
+    ]
 
-    # Start bot
+    for cmd, func in commands:
+        dp.add_handler(CommandHandler(cmd, func))
+
+    # Avvio bot
     logger.info("Bot starting...")
     updater.start_polling()
     logger.info("Bot started and polling...")
