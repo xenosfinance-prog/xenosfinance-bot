@@ -1,3 +1,12 @@
-python-telegram-bot==13.17
+# Telegram bot library compatible with Updater/Dispatcher style
+python-telegram-bot==13.14
+
+# HTTP requests for APIs
 requests
+
+# Yahoo Finance for market data
 yfinance
+
+# Optional but useful for future data handling
+pandas
+numpy
