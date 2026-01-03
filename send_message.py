@@ -3,7 +3,7 @@ from datetime import datetime
 import time
 
 # 🔹 Nuovo token del bot
-TOKEN = "7655504364:AAH5kaE-IUmQHobqKTw0cKCMEp48mwxsiyI"
+TOKEN = ""
 
 # 🔹 Inserisci l'ID del canale (con -100 se privato)
 CHANNEL_ID = "-1001234567890"
