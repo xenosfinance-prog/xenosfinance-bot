@@ -6,7 +6,7 @@ from datetime import datetime
 TOKEN = "IL_TUO_BOT_TOKEN"
 
 # 🔹 Inserisci l'ID del canale (con -100 se è privato)
-CHANNEL_ID = "-1001234567890"
+CHANNEL_ID = "-1002375600499"
 
 # 🔹 Messaggio base (puoi modificarlo o aggiungere variabili dinamiche)
 BASE_MESSAGE = "🎯 Messaggio automatico dal bot Render! Ora: {}"
