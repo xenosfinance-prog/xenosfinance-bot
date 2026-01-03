@@ -1,0 +1,13 @@
+from telegram.error import Conflict
+
+try:
+    application.run_webhook(...)
+except Conflict as e:
+    logging.error(f"Conflitto rilevato: {e}")
+    # Forza la pulizia
+    import requests
+    TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
+    requests.get(f"https://api.telegram.org/bot{TOKEN}/deleteWebhook?drop_pending_updates=true")
+    # Riavvia dopo un delay
+    time.sleep(5)
+    application.run_webhook(...)
