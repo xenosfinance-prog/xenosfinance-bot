@@ -6,7 +6,7 @@ import time
 TOKEN = ""
 
 # 🔹 Inserisci l'ID del canale (con -100 se privato)
-CHANNEL_ID = "-1001234567890"
+CHANNEL_ID = "-1002375600499"
 
 # 🔹 Messaggio base
 BASE_MESSAGE = "🎯 Messaggio automatico dal bot! Ora: {}"
