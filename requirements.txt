@@ -1,4 +1,11 @@
-python-telegram-bot==13.14
+# Bot Telegram moderno (async)
+python-telegram-bot==20.5
+
+# Per chiamate API HTTP (Alpha Vantage)
 requests
-yfinance
-urllib3==1.26.16
+
+# (opzionale) se vuoi ancora usare Yahoo Finance
+# yfinance
+
+# (opzionale) per parsing avanzato o compatibilità
+# urllib3==1.26.16
