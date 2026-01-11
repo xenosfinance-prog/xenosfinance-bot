@@ -1,29 +1,165 @@
-# Vecchi comandi (FX, commodities, macro, news, stocks, crypto)
-dp.add_handler(CommandHandler("start", start))
-dp.add_handler(CommandHandler("help", help_command))
-dp.add_handler(CommandHandler("forex_major", forex_major))
-dp.add_handler(CommandHandler("forex_minor", forex_minor))
-dp.add_handler(CommandHandler("forex_summary", forex_summary))
-dp.add_handler(CommandHandler("gold", gold))
-dp.add_handler(CommandHandler("silver", silver))
-dp.add_handler(CommandHandler("commodities", commodities))
-dp.add_handler(CommandHandler("oil_wti", oil_wti))
-dp.add_handler(CommandHandler("oil_brent", oil_brent))
-dp.add_handler(CommandHandler("ngas", ngas))
-dp.add_handler(CommandHandler("eia_report", eia_report))
-dp.add_handler(CommandHandler("macro_us", macro_us))
-dp.add_handler(CommandHandler("macro_eu", macro_eu))
-dp.add_handler(CommandHandler("macro_global", macro_global))
-dp.add_handler(CommandHandler("market_news", market_news))
-dp.add_handler(CommandHandler("us_stocks", us_stocks))
-dp.add_handler(CommandHandler("eu_stocks", eu_stocks))
-dp.add_handler(CommandHandler("pre_market", pre_market))
-dp.add_handler(CommandHandler("earnings", earnings))
-dp.add_handler(CommandHandler("crypto_major", crypto_major))
-dp.add_handler(CommandHandler("crypto_summary", crypto_summary))
+import os
+import requests
+from telegram import Update
+from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
+
+# ====================
+# Variabili d'ambiente
+# ====================
+BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+ALPHAVANTAGE_API_KEY = os.getenv("ALPHAVANTAGE_API_KEY")
+
+# ====================
+# FUNZIONI BASE
+# ====================
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("Ciao! Bot attivo ✅")
+
+async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        "/start - Avvia bot\n"
+        "/help - Lista comandi\n"
+        "/price SYMBOL - Prezzo live\n"
+        "/sma SYMBOL - Media mobile\n"
+        "/rsi SYMBOL - RSI\n"
+        "/dashboard - Dashboard multi-titolo"
+    )
+
+# ====================
+# FUNZIONI ALPHA VANTAGE
+# ====================
+def get_quote(symbol):
+    url = "https://www.alphavantage.co/query"
+    params = {
+        "function": "GLOBAL_QUOTE",
+        "symbol": symbol.upper(),
+        "apikey": ALPHAVANTAGE_API_KEY
+    }
+    r = requests.get(url, params=params).json()
+    return r.get("Global Quote", {})
+
+def get_sma(symbol):
+    url = "https://www.alphavantage.co/query"
+    params = {
+        "function": "SMA",
+        "symbol": symbol.upper(),
+        "interval": "daily",
+        "time_period": 14,
+        "series_type": "close",
+        "apikey": ALPHAVANTAGE_API_KEY
+    }
+    r = requests.get(url, params=params).json()
+    return r.get("Technical Analysis: SMA", {})
+
+def get_rsi(symbol):
+    url = "https://www.alphavantage.co/query"
+    params = {
+        "function": "RSI",
+        "symbol": symbol.upper(),
+        "interval": "daily",
+        "time_period": 14,
+        "series_type": "close",
+        "apikey": ALPHAVANTAGE_API_KEY
+    }
+    r = requests.get(url, params=params).json()
+    return r.get("Technical Analysis: RSI", {})
+
+# ====================
+# HANDLER NUOVI COMANDI
+# ====================
+async def price(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not context.args:
+        await update.message.reply_text("Usa: /price SYMBOL")
+        return
+    messages = []
+    for symbol in context.args:
+        q = get_quote(symbol)
+        if not q:
+            messages.append(f"{symbol}: dati non disponibili")
+            continue
+        price = q.get("05. price", "N/A")
+        change = float(q.get("09. change", 0))
+        pct = q.get("10. change percent", "N/A")
+        emoji = "🟢" if change >= 0 else "🔴"
+        messages.append(f"{symbol.upper()} {emoji} - ${price} ({pct})")
+    await update.message.reply_text("\n".join(messages))
+
+async def sma(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not context.args:
+        await update.message.reply_text("Usa: /sma SYMBOL")
+        return
+    symbol = context.args[0]
+    sma_data = get_sma(symbol)
+    if not sma_data:
+        await update.message.reply_text(f"SMA per {symbol.upper()} non disponibile")
+        return
+    latest_date = list(sma_data.keys())[0]
+    sma_value = sma_data[latest_date]["SMA"]
+    await update.message.reply_text(f"SMA14 {symbol.upper()}: {sma_value} (ultimo giorno: {latest_date})")
+
+async def rsi(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not context.args:
+        await update.message.reply_text("Usa: /rsi SYMBOL")
+        return
+    symbol = context.args[0]
+    rsi_data = get_rsi(symbol)
+    if not rsi_data:
+        await update.message.reply_text(f"RSI per {symbol.upper()} non disponibile")
+        return
+    latest_date = list(rsi_data.keys())[0]
+    rsi_value = rsi_data[latest_date]["RSI"]
+    await update.message.reply_text(f"RSI14 {symbol.upper()}: {rsi_value} (ultimo giorno: {latest_date})")
+
+async def dashboard(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not context.args:
+        await update.message.reply_text("Usa: /dashboard SYMBOL1 SYMBOL2 ...")
+        return
+    messages = []
+    for symbol in context.args:
+        q = get_quote(symbol)
+        if not q:
+            messages.append(f"{symbol}: dati non disponibili")
+            continue
+        price = q.get("05. price", "N/A")
+        change = float(q.get("09. change", 0))
+        pct = q.get("10. change percent", "N/A")
+        emoji = "🟢" if change >= 0 else "🔴"
+        # SMA
+        sma_data = get_sma(symbol)
+        latest_sma = list(sma_data.keys())[0] if sma_data else "N/A"
+        sma_value = sma_data[latest_sma]["SMA"] if sma_data else "N/A"
+        # RSI
+        rsi_data = get_rsi(symbol)
+        latest_rsi = list(rsi_data.keys())[0] if rsi_data else "N/A"
+        rsi_value = rsi_data[latest_rsi]["RSI"] if rsi_data else "N/A"
+        messages.append(
+            f"{symbol.upper()} {emoji} - ${price} ({pct})\nSMA14: {sma_value}, RSI14: {rsi_value}"
+        )
+    await update.message.reply_text("\n\n".join(messages))
+
+# ====================
+# APPLICATION BUILDER 20.x
+# ====================
+app = ApplicationBuilder().token(BOT_TOKEN).build()
+
+# ====================
+# AGGIUNGI TUTTI I COMANDI
+# ====================
+# Vecchi comandi (inserisci qui le tue funzioni vecchie)
+app.add_handler(CommandHandler("start", start))
+app.add_handler(CommandHandler("help", help_command))
+# Se vuoi aggiungere vecchi comandi tipo forex, commodities, etc:
+# app.add_handler(CommandHandler("forex_major", forex_major))
+# app.add_handler(CommandHandler("gold", gold))
+# ...aggiungi tutti i tuoi handler precedenti qui
 
 # Nuovi comandi Alpha Vantage
-dp.add_handler(CommandHandler("price", price))   # Prezzo live di uno o più titoli
-dp.add_handler(CommandHandler("sma", sma))       # Media mobile (SMA) di un titolo
-dp.add_handler(CommandHandler("rsi", rsi))       # RSI di un titolo
-dp.add_handler(CommandHandler("dashboard", dashboard)) # Multi-titolo + prezzi + indicatori
+app.add_handler(CommandHandler("price", price))
+app.add_handler(CommandHandler("sma", sma))
+app.add_handler(CommandHandler("rsi", rsi))
+app.add_handler(CommandHandler("dashboard", dashboard))
+
+# ====================
+# AVVIO BOT
+# ====================
+app.run_polling()
