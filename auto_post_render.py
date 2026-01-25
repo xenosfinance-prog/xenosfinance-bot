@@ -2,20 +2,17 @@ import requests
 import time
 from datetime import datetime
 import os
-from dotenv import load_dotenv
 
-# 🔹 CARICA VARIABILI DA .env (per sicurezza)
-load_dotenv()
+# 🔹 LEGGI VARIABILI DA RAILWAY
+TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
+CHANNEL_ID = os.environ.get("TELEGRAM_CHANNEL_ID", "-1002375600499")
 
-# 🔹 Inserisci il token del tuo bot (MEGLIO COME VARIABILE D'AMBIENTE)
-TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "IL_TUO_BOT_TOKEN")
-
-# 🔹 FIX CRITICO: L'ID del canale NON deve essere stringa se è numerico!
-# Per canali privati: usa numero intero NEGATIVO
-CHANNEL_ID = -1002375600499  # ⚠️ RIMUOVI LE VIRGOLETTE! Solo numero
+# 🔹 FIX: CHANNEL_ID può essere stringa per API Telegram
+if CHANNEL_ID and CHANNEL_ID.isdigit():
+    CHANNEL_ID = int(CHANNEL_ID)
 
 # 🔹 Messaggio base
-BASE_MESSAGE = "🎯 Messaggio automatico dal bot Render! Ora: {}"
+BASE_MESSAGE = "🎯 Messaggio automatico dal bot Railway! Ora: {}"
 
 # 🔹 Intervallo tra i messaggi (in secondi)
 INTERVAL = 3600
@@ -24,12 +21,12 @@ INTERVAL = 3600
 def send_message(text):
     url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
     payload = {
-        "chat_id": CHANNEL_ID,  # Ora è un numero, non stringa
+        "chat_id": CHANNEL_ID,
         "text": text,
-        "parse_mode": "HTML"  # ⭐ Aggiunto per formattazione
+        "parse_mode": "HTML"
     }
     try:
-        r = requests.post(url, json=payload, timeout=10)  # ⭐ Usa json= invece di data=
+        r = requests.post(url, json=payload, timeout=10)
         result = r.json()
         
         if result.get("ok"):
@@ -63,12 +60,17 @@ def test_token():
 
 # Loop principale
 if __name__ == "__main__":
-    print(f"🚀 Avvio bot...")
-    print(f"Token (primi 10 char): {TOKEN[:10]}...")
+    print(f"🚀 Avvio bot Railway...")
+    print(f"Token (primi 10 char): {TOKEN[:10] if TOKEN else 'NONE'}...")
     print(f"Channel ID: {CHANNEL_ID}")
     print(f"Intervallo: {INTERVAL} secondi ({INTERVAL/3600} ore)")
     
     # Test del token prima di iniziare
+    if not TOKEN:
+        print("❌ Token non configurato! Configura su Railway → Variables")
+        print("💡 Aggiungi: TELEGRAM_BOT_TOKEN = 'il_tuo_token'")
+        exit(1)
+    
     if not test_token():
         print("❌ Token non valido! Fermo l'esecuzione.")
         exit(1)
