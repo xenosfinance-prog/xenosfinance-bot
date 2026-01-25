@@ -8,8 +8,8 @@ import sys
 # CONFIGURAZIONE - LEGGE DA VARIABILI D'AMBIENTE
 # =============================================
 
-# 🔹 LEGGI IL TOKEN DA RENDER.COM
-# Su Render: Environment → Add Variable → TELEGRAM_BOT_TOKEN = "tuo_token"
+# 🔹 LEGGI IL TOKEN DA RAILWAY
+# Su Railway: Variables → Add Variable → TELEGRAM_BOT_TOKEN = "tuo_token"
 TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 
 # 🔹 ID del canale Telegram (usa il tuo)
@@ -35,12 +35,12 @@ def check_environment():
     if not TOKEN:
         print("❌ ERRORE: TELEGRAM_BOT_TOKEN non configurato!")
         print("\n💡 SOLUZIONE:")
-        print("1. Vai su Render.com → il tuo servizio")
-        print("2. Clicca 'Environment'")
+        print("1. Vai su Railway.app → il tuo progetto")
+        print("2. Clicca 'Variables' tab")
         print("3. Aggiungi variabile:")
-        print("   Key: TELEGRAM_BOT_TOKEN")
+        print("   Name: TELEGRAM_BOT_TOKEN")
         print("   Value: Il tuo token da @BotFather")
-        print("4. Riavvia il servizio")
+        print("4. Clicca 'Redeploy'")
         return False
     
     print(f"✅ Token: {TOKEN[:10]}...")
@@ -109,7 +109,7 @@ def send_telegram_message(text):
 def main():
     """Funzione principale del bot"""
     print("=" * 60)
-    print("🤖 BOT TELEGRAM PER RENDER.COM")
+    print("🤖 BOT TELEGRAM PER RAILWAY")
     print("=" * 60)
     
     # Verifica configurazione
@@ -175,7 +175,7 @@ def main():
         
     except Exception as e:
         print(f"\n⚠️ ERRORE CRITICO: {e}")
-        print("💡 Controlla i log su Render.com per dettagli")
+        print("💡 Controlla i log su Railway per dettagli")
 
 # =============================================
 # AVVIO
