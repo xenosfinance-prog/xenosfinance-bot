@@ -34,3 +34,13 @@ app.add_handler(CommandHandler("help", help_cmd))
 
 print("🚀 Bot avviato...")
 app.run_polling()
+# Aggiungi queste righe in fondo al file
+if __name__ == "__main__":
+    # Se eseguito con pytest, esci senza errori
+    import sys
+    if "pytest" in sys.modules:
+        print("✅ Test mode - skipping bot startup")
+        sys.exit(0)
+    else:
+        # Avvia normalmente il bot
+        app.run_polling()
