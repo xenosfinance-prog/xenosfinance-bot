@@ -4,39 +4,33 @@ from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 
 # ==========================
-# VALORI DIRETTI - RAILWAY PROBLEMA VARIABILI
+# LEGGI DA VARIABILI D'AMBIENTE
 # ==========================
-BOT_TOKEN = "8522641168:AAGpRKL30HMcnGawGX1cdZ6ao1u5bZWpTA"
-ALPHAVANTAGE_API_KEY = "M6FQOZ01M20T34ET"
+BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 
-print("=" * 60)
-print("🤖 BOT AVVIATO SU RAILWAY")
-print(f"Token: {BOT_TOKEN[:15]}...")
-print("=" * 60)
+if not BOT_TOKEN:
+    print("❌ ERRORE: Token non configurato su Railway")
+    print("💡 Vai su Railway → Variables → TELEGRAM_BOT_TOKEN")
+    print("💡 Inserisci il NUOVO token rigenerato")
+    exit(1)
+
+print(f"✅ Token configurato: {BOT_TOKEN[:10]}...")
 
 # ==========================
 # FUNZIONI BASE
 # ==========================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("🚀 Bot attivo su Railway!")
+    await update.message.reply_text("✅ Bot attivo!")
 
 async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("/start - Avvia\n/help - Comandi")
-
-async def price(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if context.args:
-        symbol = context.args[0].upper()
-        await update.message.reply_text(f"{symbol}: $150.00 📈")
-    else:
-        await update.message.reply_text("Es: /price AAPL")
+    await update.message.reply_text("/start - Avvia\n/help - Aiuto")
 
 # ==========================
-# AVVIO BOT
+# AVVIO
 # ==========================
 app = ApplicationBuilder().token(BOT_TOKEN).build()
 app.add_handler(CommandHandler("start", start))
 app.add_handler(CommandHandler("help", help_cmd))
-app.add_handler(CommandHandler("price", price))
 
-print("✅ Bot in esecuzione...")
+print("🚀 Bot avviato...")
 app.run_polling()
