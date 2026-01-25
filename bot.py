@@ -4,77 +4,39 @@ from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 
 # ==========================
-# VARIABILI D'AMBIENTE DA RAILWAY
+# VALORI DIRETTI - RAILWAY PROBLEMA VARIABILI
 # ==========================
-BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-ALPHAVANTAGE_API_KEY = os.getenv("ALPHAVANTAGE_API_KEY")
+BOT_TOKEN = "8522641168:AAGpRKL30HMcnGawGX1cdZ6ao1u5bZWpTA"
+ALPHAVANTAGE_API_KEY = "M6FQOZ01M20T34ET"
 
-# DEBUG - Verifica
 print("=" * 60)
-print("🤖 CONFIGURAZIONE BOT")
-print("=" * 60)
-print(f"Token trovato: {'✅' if BOT_TOKEN else '❌'}")
-print(f"Token valore: {BOT_TOKEN[:15] if BOT_TOKEN else 'NONE'}...")
-print(f"Alpha Vantage Key: {'✅' if ALPHAVANTAGE_API_KEY else '❌'}")
+print("🤖 BOT AVVIATO SU RAILWAY")
+print(f"Token: {BOT_TOKEN[:15]}...")
 print("=" * 60)
 
 # ==========================
-# FUNZIONI DEL BOT (IL TUO CODICE)
+# FUNZIONI BASE
 # ==========================
-
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Ciao! Bot attivo ✅")
+    await update.message.reply_text("🚀 Bot attivo su Railway!")
 
-async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "/start - Avvia il bot\n"
-        "/help - Lista comandi\n"
-        "/price SYMBOL - Prezzo live\n"
-        "/sma SYMBOL - Media mobile (SMA14)\n"
-        "/rsi SYMBOL - RSI14\n"
-        "/dashboard SYMBOL1 SYMBOL2 ... - Multi-titolo"
-    )
-
-def get_quote(symbol):
-    if not ALPHAVANTAGE_API_KEY:
-        return None
-    url = "https://www.alphavantage.co/query"
-    params = {
-        "function": "GLOBAL_QUOTE",
-        "symbol": symbol,
-        "apikey": ALPHAVANTAGE_API_KEY
-    }
-    r = requests.get(url, params=params).json()
-    return r.get("Global Quote", {})
+async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("/start - Avvia\n/help - Comandi")
 
 async def price(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not context.args:
-        await update.message.reply_text("Usa: /price SYMBOL")
-        return
-    symbol = context.args[0].upper()
-    q = get_quote(symbol)
-    if not q:
-        await update.message.reply_text(f"Nessun dato per {symbol}")
-        return
-    price_val = q.get("05. price", "N/A")
-    change = float(q.get("09. change", 0))
-    pct = q.get("10. change percent", "N/A")
-    emoji = "🟢" if change >= 0 else "🔴"
-    await update.message.reply_text(f"{symbol}: ${price_val} ({emoji} {pct})")
+    if context.args:
+        symbol = context.args[0].upper()
+        await update.message.reply_text(f"{symbol}: $150.00 📈")
+    else:
+        await update.message.reply_text("Es: /price AAPL")
 
 # ==========================
 # AVVIO BOT
 # ==========================
-if BOT_TOKEN:
-    app = ApplicationBuilder().token(BOT_TOKEN).build()
-    
-    # Aggiungi handler
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("help", help_command))
-    app.add_handler(CommandHandler("price", price))
-    
-    print("🚀 Bot avviato e in polling...")
-    app.run_polling()
-else:
-    print("❌ ERRORE: Token Telegram non trovato")
-    print("💡 Verifica su Railway → Variables → TELEGRAM_BOT_TOKEN")
+app = ApplicationBuilder().token(BOT_TOKEN).build()
+app.add_handler(CommandHandler("start", start))
+app.add_handler(CommandHandler("help", help_cmd))
+app.add_handler(CommandHandler("price", price))
+
+print("✅ Bot in esecuzione...")
+app.run_polling()
