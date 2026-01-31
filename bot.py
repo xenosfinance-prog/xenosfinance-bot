@@ -619,6 +619,48 @@ async def crypto_summary(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("₿ Crypto markets: Check /crypto_major for detailed analysis")
 
 # ======= MAIN APPLICATION =======
+async def scheduled_updates_task(app):
+    """Background task for scheduled market updates"""
+    print("📅 Scheduled updates task started")
+    
+    # Send initial market update if it's a weekday
+    if CHANNEL_ID:
+        if MarketSchedule.is_weekday():
+            print("📊 Sending initial market update...")
+            await send_professional_market_update()
+        else:
+            print("🏖️ Weekend - No initial update sent")
+            print("   Bot will resume Monday")
+    
+    # Main loop: send updates every 4 hours on weekdays only
+    last_update_day = None
+    
+    while True:
+        try:
+            # Wait 4 hours
+            await asyncio.sleep(14400)  # 4 hours = 14400 seconds
+            
+            if CHANNEL_ID and MarketSchedule.is_weekday():
+                current_day = MarketSchedule.get_current_time_et().date()
+                
+                # Send update
+                print(f"\n{'='*60}")
+                print(f"⏰ 4-hour interval reached - {MarketSchedule.get_current_time_et().strftime('%A %H:%M ET')}")
+                await send_professional_market_update()
+                last_update_day = current_day
+                
+            else:
+                current = MarketSchedule.get_current_time_et()
+                if current.weekday() >= 5:
+                    # Only log once per weekend check
+                    if last_update_day != current.date():
+                        print(f"\n🏖️ Weekend detected - Skipping update ({current.strftime('%A')})")
+                        print("   Next update: Monday morning")
+                        last_update_day = current.date()
+        except Exception as e:
+            print(f"❌ Error in scheduled updates: {e}")
+            await asyncio.sleep(60)  # Wait a minute before retrying
+
 async def main():
     print("=" * 70)
     print("🚀 PROFESSIONAL MARKET ANALYSIS BOT STARTING")
@@ -665,53 +707,35 @@ async def main():
     
     print("✅ All command handlers registered")
     
-    # Initialize bot
+    # Initialize and start bot with polling
     await app.initialize()
     await app.start()
     
-    print("🤖 Bot is now running in BACKGROUND MODE (no webhook, no polling)...")
+    # Start polling with conflict resolution
+    print("🤖 Starting bot with polling (conflict resolution enabled)...")
     print("📅 Schedule: Updates every 4 hours, Monday-Friday only")
     print("🕐 Market Hours: 9:30 AM - 4:00 PM ET")
     print("🌅 Pre-Market: 4:00 AM - 9:30 AM ET")
     print("🌆 Post-Market: 4:00 PM - 8:00 PM ET")
     
-    # Send initial market update if it's a weekday
-    if CHANNEL_ID:
-        if MarketSchedule.is_weekday():
-            print("📊 Sending initial market update...")
-            await send_professional_market_update()
-        else:
-            print("🏖️ Weekend - No initial update sent")
-            print("   Bot will resume Monday")
-    
-    # Main loop: send updates every 4 hours on weekdays only
     try:
-        last_update_day = None
+        # Start polling with drop_pending_updates to clear any conflicts
+        await app.updater.start_polling(
+            drop_pending_updates=True,
+            allowed_updates=Update.ALL_TYPES
+        )
         
-        while True:
-            # Wait 4 hours
-            await asyncio.sleep(14400)  # 4 hours = 14400 seconds
-            
-            if CHANNEL_ID and MarketSchedule.is_weekday():
-                current_day = MarketSchedule.get_current_time_et().date()
-                
-                # Send update
-                print(f"\n{'='*60}")
-                print(f"⏰ 4-hour interval reached - {MarketSchedule.get_current_time_et().strftime('%A %H:%M ET')}")
-                await send_professional_market_update()
-                last_update_day = current_day
-                
-            else:
-                current = MarketSchedule.get_current_time_et()
-                if current.weekday() >= 5:
-                    # Only log once per weekend check
-                    if last_update_day != current.date():
-                        print(f"\n🏖️ Weekend detected - Skipping update ({current.strftime('%A')})")
-                        print("   Next update: Monday morning")
-                        last_update_day = current.date()
-                        
+        print("✅ Bot polling started successfully!")
+        
+        # Run scheduled updates in background
+        await scheduled_updates_task(app)
+        
     except KeyboardInterrupt:
         print("\n⚠️  Shutting down bot...")
+    except Exception as e:
+        print(f"❌ Error: {e}")
+    finally:
+        await app.updater.stop()
         await app.stop()
         await app.shutdown()
         print("✅ Bot stopped successfully")
