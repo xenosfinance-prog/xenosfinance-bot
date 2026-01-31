@@ -1,4 +1,4 @@
-python-telegram-bot[webhooks]==20.7
-yfinance
-requests
-python-dotenv
+python-telegram-bot==20.7
+yfinance==0.2.33
+requests==2.31.0
+pytz==2023.3
