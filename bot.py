@@ -1,6 +1,7 @@
 import os
 import asyncio
 from datetime import datetime, timedelta
+import pytz
 from telegram import Update, Bot
 from telegram.ext import Application, CommandHandler, ContextTypes
 import yfinance as yf
@@ -11,6 +12,109 @@ from typing import Dict, Optional
 TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 CHANNEL_ID = os.getenv("TELEGRAM_CHANNEL_ID")
 NEWS_API_KEY = os.getenv("NEWS_API_KEY", "")  # Get free key from newsapi.org
+
+# Timezones
+ET = pytz.timezone('America/New_York')
+UTC = pytz.UTC
+
+# Market hours (Eastern Time)
+MARKET_OPEN = 9, 30  # 9:30 AM ET
+MARKET_CLOSE = 16, 0  # 4:00 PM ET
+PRE_MARKET_START = 4, 0  # 4:00 AM ET
+POST_MARKET_END = 20, 0  # 8:00 PM ET
+
+# ======= MARKET SCHEDULE MANAGER =======
+class MarketSchedule:
+    @staticmethod
+    def get_current_time_et() -> datetime:
+        """Get current time in Eastern Time"""
+        return datetime.now(ET)
+    
+    @staticmethod
+    def is_weekday() -> bool:
+        """Check if today is Monday-Friday"""
+        current = MarketSchedule.get_current_time_et()
+        return current.weekday() < 5  # 0=Monday, 4=Friday
+    
+    @staticmethod
+    def get_market_status() -> str:
+        """Determine current market status"""
+        if not MarketSchedule.is_weekday():
+            return "CLOSED_WEEKEND"
+        
+        current = MarketSchedule.get_current_time_et()
+        current_time = (current.hour, current.minute)
+        
+        # Convert to minutes for easier comparison
+        current_mins = current.hour * 60 + current.minute
+        pre_market_mins = PRE_MARKET_START[0] * 60 + PRE_MARKET_START[1]
+        market_open_mins = MARKET_OPEN[0] * 60 + MARKET_OPEN[1]
+        market_close_mins = MARKET_CLOSE[0] * 60 + MARKET_CLOSE[1]
+        post_market_mins = POST_MARKET_END[0] * 60 + POST_MARKET_END[1]
+        
+        if current_mins < pre_market_mins:
+            return "CLOSED_OVERNIGHT"
+        elif current_mins < market_open_mins:
+            return "PRE_MARKET"
+        elif current_mins < market_close_mins:
+            return "MARKET_OPEN"
+        elif current_mins < post_market_mins:
+            return "POST_MARKET"
+        else:
+            return "CLOSED_OVERNIGHT"
+    
+    @staticmethod
+    def get_next_market_event() -> tuple:
+        """Get the next market event (open/close) and time"""
+        current = MarketSchedule.get_current_time_et()
+        status = MarketSchedule.get_market_status()
+        
+        if status == "CLOSED_WEEKEND":
+            # Find next Monday
+            days_ahead = 7 - current.weekday()
+            if days_ahead == 7:
+                days_ahead = 1
+            next_monday = current + timedelta(days=days_ahead)
+            next_event = next_monday.replace(hour=PRE_MARKET_START[0], minute=PRE_MARKET_START[1], second=0, microsecond=0)
+            return "PRE_MARKET_OPEN", next_event
+        
+        elif status == "CLOSED_OVERNIGHT":
+            # Next is pre-market
+            if current.hour >= POST_MARKET_END[0]:
+                # Tomorrow's pre-market
+                next_day = current + timedelta(days=1)
+                next_event = next_day.replace(hour=PRE_MARKET_START[0], minute=PRE_MARKET_START[1], second=0, microsecond=0)
+            else:
+                # Today's pre-market
+                next_event = current.replace(hour=PRE_MARKET_START[0], minute=PRE_MARKET_START[1], second=0, microsecond=0)
+            return "PRE_MARKET_OPEN", next_event
+        
+        elif status == "PRE_MARKET":
+            next_event = current.replace(hour=MARKET_OPEN[0], minute=MARKET_OPEN[1], second=0, microsecond=0)
+            return "MARKET_OPEN", next_event
+        
+        elif status == "MARKET_OPEN":
+            next_event = current.replace(hour=MARKET_CLOSE[0], minute=MARKET_CLOSE[1], second=0, microsecond=0)
+            return "MARKET_CLOSE", next_event
+        
+        elif status == "POST_MARKET":
+            next_event = current.replace(hour=POST_MARKET_END[0], minute=POST_MARKET_END[1], second=0, microsecond=0)
+            return "POST_MARKET_CLOSE", next_event
+        
+        return "UNKNOWN", current
+    
+    @staticmethod
+    def get_market_status_emoji() -> str:
+        """Get emoji for current market status"""
+        status = MarketSchedule.get_market_status()
+        emojis = {
+            "PRE_MARKET": "🌅",
+            "MARKET_OPEN": "🔔",
+            "POST_MARKET": "🌆",
+            "CLOSED_OVERNIGHT": "🌙",
+            "CLOSED_WEEKEND": "🏖️"
+        }
+        return emojis.get(status, "⏰")
 
 # ======= MARKET DATA FETCHER =======
 class MarketAnalyzer:
@@ -114,9 +218,31 @@ async def send_professional_market_update():
     bot = Bot(token=TOKEN)
     analyzer = MarketAnalyzer()
     news_fetcher = NewsFetcher()
+    schedule = MarketSchedule()
     
     try:
         print("📊 Generating professional market update...")
+        
+        # Get market status
+        market_status = schedule.get_market_status()
+        status_emoji = schedule.get_market_status_emoji()
+        next_event, next_time = schedule.get_next_market_event()
+        
+        # Format next event time
+        time_until = next_time - schedule.get_current_time_et()
+        hours_until = int(time_until.total_seconds() / 3600)
+        mins_until = int((time_until.total_seconds() % 3600) / 60)
+        
+        # Market status messages
+        status_messages = {
+            "PRE_MARKET": "🌅 **PRE-MARKET SESSION** - US markets opening soon",
+            "MARKET_OPEN": "🔔 **MARKET OPEN** - Active trading session",
+            "POST_MARKET": "🌆 **POST-MARKET SESSION** - Extended hours trading",
+            "CLOSED_OVERNIGHT": "🌙 **MARKETS CLOSED** - Overnight session",
+            "CLOSED_WEEKEND": "🏖️ **WEEKEND** - Markets resume Monday"
+        }
+        
+        status_message = status_messages.get(market_status, "⏰ Market Status Unknown")
         
         # ===== FETCH ALL MARKET DATA =====
         futures_data = {
@@ -163,8 +289,10 @@ async def send_professional_market_update():
         sentiment = analyzer.get_market_sentiment(all_data)
         
         # ===== TIMESTAMP =====
-        now = datetime.utcnow()
-        timestamp = now.strftime("%Y-%m-%d %H:%M UTC")
+        now = datetime.now(UTC)
+        et_time = now.astimezone(ET)
+        timestamp = et_time.strftime("%Y-%m-%d %H:%M ET")
+        day_name = et_time.strftime("%A")
         
         # ===== BUILD PROFESSIONAL MESSAGE =====
         message = f"""
@@ -172,7 +300,10 @@ async def send_professional_market_update():
     📊 **PROFESSIONAL MARKET ANALYSIS**
 ╚═══════════════════════════════════╝
 
-🕐 **{timestamp}**
+🕐 **{timestamp}** ({day_name})
+
+{status_emoji} {status_message}
+⏰ **Next**: {next_event.replace('_', ' ')} in {hours_until}h {mins_until}m
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 📌 **MARKET SENTIMENT**
@@ -253,12 +384,17 @@ async def send_professional_market_update():
 This analysis is for informational purposes only. 
 Not financial advice. Always DYOR.
 
-⏰ **Next update in 2 hours**
+⏰ **Update Schedule**: Every 4 hours (Mon-Fri only)
+🔔 **Market Hours**: 9:30 AM - 4:00 PM ET
+🌅 **Pre-Market**: 4:00 AM - 9:30 AM ET
+🌆 **Post-Market**: 4:00 PM - 8:00 PM ET
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 """
         
         await bot.send_message(chat_id=CHANNEL_ID, text=message, parse_mode='Markdown')
         print(f"✅ Professional market update sent at {timestamp}")
+        print(f"   Market Status: {market_status}")
+        print(f"   Next Event: {next_event} in {hours_until}h {mins_until}m")
         
     except Exception as e:
         print(f"❌ Error sending professional update: {e}")
@@ -533,18 +669,46 @@ async def main():
     await app.updater.start_polling()
     
     print("🤖 Bot is now running and polling for messages...")
+    print("📅 Schedule: Updates every 4 hours, Monday-Friday only")
+    print("🕐 Market Hours: 9:30 AM - 4:00 PM ET")
+    print("🌅 Pre-Market: 4:00 AM - 9:30 AM ET")
+    print("🌆 Post-Market: 4:00 PM - 8:00 PM ET")
     
-    # Send initial market update
+    # Send initial market update if it's a weekday
     if CHANNEL_ID:
-        print("📊 Sending initial market update...")
-        await send_professional_market_update()
+        if MarketSchedule.is_weekday():
+            print("📊 Sending initial market update...")
+            await send_professional_market_update()
+        else:
+            print("🏖️ Weekend - No initial update sent")
+            print("   Bot will resume Monday")
     
-    # Main loop: send updates every 2 hours
+    # Main loop: send updates every 4 hours on weekdays only
     try:
+        last_update_day = None
+        
         while True:
-            await asyncio.sleep(7200)  # 2 hours = 7200 seconds
-            if CHANNEL_ID:
+            # Wait 4 hours
+            await asyncio.sleep(14400)  # 4 hours = 14400 seconds
+            
+            if CHANNEL_ID and MarketSchedule.is_weekday():
+                current_day = MarketSchedule.get_current_time_et().date()
+                
+                # Send update
+                print(f"\n{'='*60}")
+                print(f"⏰ 4-hour interval reached - {MarketSchedule.get_current_time_et().strftime('%A %H:%M ET')}")
                 await send_professional_market_update()
+                last_update_day = current_day
+                
+            else:
+                current = MarketSchedule.get_current_time_et()
+                if current.weekday() >= 5:
+                    # Only log once per weekend check
+                    if last_update_day != current.date():
+                        print(f"\n🏖️ Weekend detected - Skipping update ({current.strftime('%A')})")
+                        print("   Next update: Monday morning")
+                        last_update_day = current.date()
+                        
     except KeyboardInterrupt:
         print("\n⚠️  Shutting down bot...")
         await app.updater.stop()
