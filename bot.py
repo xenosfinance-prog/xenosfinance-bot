@@ -132,16 +132,12 @@ async def crypto_summary(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # ======= AUTO POST TO CHANNEL =======
 async def send_market_update():
-    """Send automatic market update to channel"""
     bot = Bot(token=TOKEN)
-    
     try:
-        # Get real prices
         btc = yf.Ticker("BTC-USD").info.get('regularMarketPrice', 0)
         eth = yf.Ticker("ETH-USD").info.get('regularMarketPrice', 0)
         gold_price = yf.Ticker("GC=F").info.get('regularMarketPrice', 0)
-        
-        message = f"""📊 **Market Update**
+        message = f"""📊 Market Update
 
 💰 Crypto:
 - BTC: ${btc:,.0f}
@@ -152,8 +148,7 @@ async def send_market_update():
 
 📈 Markets stable, tracking intraday movements...
 """
-        
-        await bot.send_message(chat_id=CHANNEL_ID, text=message, parse_mode='Markdown')
+        await bot.send_message(chat_id=CHANNEL_ID, text=message)
         print("✅ Market update sent to channel!")
     except Exception as e:
         print(f"❌ Error sending update: {e}")
@@ -163,17 +158,11 @@ async def main():
     print("=" * 60)
     print("🚀 BOT STARTING")
     print("=" * 60)
-    
     if not TOKEN:
         print("❌ TELEGRAM_BOT_TOKEN missing")
         return
-    
     print(f"✅ Token OK: {TOKEN[:15]}...")
-    
-    # Create application
     app = Application.builder().token(TOKEN).build()
-    
-    # Add command handlers
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("help", help_command))
     app.add_handler(CommandHandler("forex_major", forex_major))
@@ -196,24 +185,11 @@ async def main():
     app.add_handler(CommandHandler("earnings", earnings))
     app.add_handler(CommandHandler("crypto_major", crypto_major))
     app.add_handler(CommandHandler("crypto_summary", crypto_summary))
-    
     print("🤖 Bot started with all commands!")
-    
-    # Send first update
     await send_market_update()
-    
-    # Loop for hourly updates
     while True:
-        await asyncio.sleep(3600)  # 1 hour
+        await asyncio.sleep(3600)
         await send_market_update()
 
 if __name__ == "__main__":
     asyncio.run(main())
-```
-
-**Poi aggiorna anche `requirements.txt`:**
-```
-python-telegram-bot[webhooks]==20.7
-yfinance
-requests
-python-dotenv
