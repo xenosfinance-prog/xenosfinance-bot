@@ -162,7 +162,9 @@ async def main():
         print("❌ TELEGRAM_BOT_TOKEN missing")
         return
     print(f"✅ Token OK: {TOKEN[:15]}...")
+    
     app = Application.builder().token(TOKEN).build()
+    
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("help", help_command))
     app.add_handler(CommandHandler("forex_major", forex_major))
@@ -185,11 +187,26 @@ async def main():
     app.add_handler(CommandHandler("earnings", earnings))
     app.add_handler(CommandHandler("crypto_major", crypto_major))
     app.add_handler(CommandHandler("crypto_summary", crypto_summary))
+    
     print("🤖 Bot started with all commands!")
+    
+    # Start polling in background
+    await app.initialize()
+    await app.start()
+    await app.updater.start_polling()
+    
+    # Send first update
     await send_market_update()
-    while True:
-        await asyncio.sleep(3600)
-        await send_market_update()
+    
+    # Loop for hourly updates
+    try:
+        while True:
+            await asyncio.sleep(3600)
+            await send_market_update()
+    except KeyboardInterrupt:
+        await app.updater.stop()
+        await app.stop()
+        await app.shutdown()
 
 if __name__ == "__main__":
     asyncio.run(main())
