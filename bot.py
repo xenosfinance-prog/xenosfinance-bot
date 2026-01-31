@@ -1,4 +1,4 @@
-pythonimport os
+import os
 from telegram.ext import ApplicationBuilder, CommandHandler
 
 def main():
