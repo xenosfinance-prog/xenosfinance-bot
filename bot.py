@@ -12,6 +12,7 @@ from typing import Dict, Optional
 TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 CHANNEL_ID = os.getenv("TELEGRAM_CHANNEL_ID")
 NEWS_API_KEY = os.getenv("NEWS_API_KEY", "")  # Get free key from newsapi.org
+PORT = int(os.getenv("PORT", 8443))  # Railway assigns this automatically
 
 # Timezones
 ET = pytz.timezone('America/New_York')
@@ -632,6 +633,7 @@ async def main():
     
     print(f"✅ Token configured: {TOKEN[:15]}...")
     print(f"✅ Channel ID: {CHANNEL_ID}")
+    print(f"✅ Port: {PORT}")
     
     # Build application
     app = Application.builder().token(TOKEN).build()
@@ -663,12 +665,11 @@ async def main():
     
     print("✅ All command handlers registered")
     
-    # Initialize and start bot
+    # Initialize bot
     await app.initialize()
     await app.start()
-    await app.updater.start_polling()
     
-    print("🤖 Bot is now running and polling for messages...")
+    print("🤖 Bot is now running in BACKGROUND MODE (no webhook, no polling)...")
     print("📅 Schedule: Updates every 4 hours, Monday-Friday only")
     print("🕐 Market Hours: 9:30 AM - 4:00 PM ET")
     print("🌅 Pre-Market: 4:00 AM - 9:30 AM ET")
@@ -711,7 +712,6 @@ async def main():
                         
     except KeyboardInterrupt:
         print("\n⚠️  Shutting down bot...")
-        await app.updater.stop()
         await app.stop()
         await app.shutdown()
         print("✅ Bot stopped successfully")
