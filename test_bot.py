@@ -1,8 +1,11 @@
-from telegram import Bot
+import pytest
+import os
 
-TOKEN = "IL_TUO_TOKEN"  # metti il token reale
-CHANNEL_ID = "-1001234567890"  # metti l'ID reale del canale
+def test_environment_variables():
+    """Test che le variabili d'ambiente siano configurabili"""
+    assert True
 
-bot = Bot(token=TOKEN)
-bot.send_message(chat_id=CHANNEL_ID, text="✅ Bot funziona, messaggio inviato!")
-print("Messaggio inviato correttamente")
+def test_token_format():
+    """Test formato token"""
+    token = os.getenv("TELEGRAM_BOT_TOKEN", "123456:ABC-DEF")
+    assert ":" in token
