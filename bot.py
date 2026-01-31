@@ -4,7 +4,11 @@ import requests
 from datetime import datetime
 import yfinance as yf
 from telegram import Update
-from telegram.ext import Application, CommandHandler, ContextTypes
+from telegram.ext import (
+    Application,
+    CommandHandler,
+    ContextTypes,
+)
 
 # ===== ENV =====
 TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
@@ -17,8 +21,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "Auto market & geo updates enabled.\n"
-        "Use /start to check status."
+        "Auto market + geo updates enabled.\n"
+        "No manual action required."
     )
 
 # ===== GEO NEWS =====
@@ -52,54 +56,48 @@ def macro_summary(news):
         return "Energy supply risks adding inflation pressure."
     return "Macro environment remains fragile."
 
-# ===== AUTO TASK =====
-async def auto_task(app: Application):
-    await app.bot.send_message(chat_id=CHANNEL_ID, text="🤖 Bot started successfully.")
+# ===== JOB (AUTO TASK) =====
+async def auto_update(context: ContextTypes.DEFAULT_TYPE):
+    bot = context.bot
 
-    while True:
-        try:
-            # Market snapshot
-            btc = yf.Ticker("BTC-USD").info.get("regularMarketPrice", 0)
-            eth = yf.Ticker("ETH-USD").info.get("regularMarketPrice", 0)
-            gold = yf.Ticker("GC=F").info.get("regularMarketPrice", 0)
+    try:
+        btc = yf.Ticker("BTC-USD").info.get("regularMarketPrice", 0)
+        eth = yf.Ticker("ETH-USD").info.get("regularMarketPrice", 0)
+        gold = yf.Ticker("GC=F").info.get("regularMarketPrice", 0)
 
-            market_msg = f"""📊 MARKET UPDATE
+        market_msg = f"""📊 MARKET UPDATE
 
 • BTC: ${btc:,.0f}
 • ETH: ${eth:,.0f}
 • Gold: ${gold:,.2f}
 """
-            await app.bot.send_message(chat_id=CHANNEL_ID, text=market_msg)
+        await bot.send_message(chat_id=CHANNEL_ID, text=market_msg)
 
-            # Geo & futures (every 2h)
-            news = get_geo_news()
-            if news:
-                sp = yf.Ticker("^GSPC").info.get("regularMarketPrice", "N/A")
-                oil = yf.Ticker("CL=F").info.get("regularMarketPrice", 0)
+        news = get_geo_news()
+        if news:
+            sp = yf.Ticker("^GSPC").info.get("regularMarketPrice", "N/A")
+            oil = yf.Ticker("CL=F").info.get("regularMarketPrice", 0)
 
-                geo_msg = f"""🌍 GEO & FUTURES INTELLIGENCE
+            geo_msg = f"""🌍 GEO & FUTURES INTELLIGENCE
 
 • S&P 500: {sp}
 • Oil WTI: ${oil:.2f}
 
 📰 High-impact news:
 """
-                for n in news:
-                    geo_msg += f"• {n['title']}\n"
+            for n in news:
+                geo_msg += f"• {n['title']}\n"
 
-                geo_msg += f"""
+            geo_msg += f"""
 🧠 Macro Summary
 • {macro_summary(news)}
 
 🕒 {datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}
 """
-                await app.bot.send_message(chat_id=CHANNEL_ID, text=geo_msg)
+            await bot.send_message(chat_id=CHANNEL_ID, text=geo_msg)
 
-            await asyncio.sleep(7200)  # 2 HOURS
-
-        except Exception as e:
-            print("AUTO TASK ERROR:", e)
-            await asyncio.sleep(300)
+    except Exception as e:
+        print("AUTO UPDATE ERROR:", e)
 
 # ===== MAIN =====
 async def main():
@@ -111,11 +109,15 @@ async def main():
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("help", help_command))
 
-    async with app:
-        app.create_task(auto_task(app))
-        await app.start()
-        await app.bot.initialize()
-        await app.run_polling()
+    # ✅ JOB QUEUE — SAFE
+    app.job_queue.run_repeating(
+        auto_update,
+        interval=7200,   # 2 hours
+        first=10
+    )
+
+    print("🤖 Bot running with stable polling + job queue")
+    await app.run_polling()
 
 if __name__ == "__main__":
     asyncio.run(main())
