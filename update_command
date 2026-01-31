@@ -1,0 +1,12 @@
+async def update_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Debug: mostra chat info"""
+    chat = update.effective_chat
+    message = (
+        f"🔍 **Chat Debug Info**\n\n"
+        f"📌 Chat ID: `{chat.id}`\n"
+        f"📌 Chat Type: `{chat.type}`\n"
+        f"📌 Chat Title: `{chat.title}`\n\n"
+        f"⚙️ **Attualmente configurato:**\n"
+        f"CHANNEL_ID: `{CHANNEL_ID}`"
+    )
+    await update.message.reply_text(message, parse_mode='Markdown')
