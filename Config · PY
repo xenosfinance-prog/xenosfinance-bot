@@ -1,0 +1,210 @@
+# config.py - Configurazione personalizzabile del bot
+"""
+File di configurazione per personalizzare facilmente il comportamento del bot
+senza modificare il codice principale
+"""
+
+# ===== SIMBOLI MERCATO =====
+# Aggiungi o rimuovi simboli qui
+
+INDICES = {
+    'ES=F': 'S&P 500 Futures',
+    'NQ=F': 'Nasdaq 100 Futures',
+    'YM=F': 'Dow Jones Futures',
+    'RTY=F': 'Russell 2000 Futures',
+    '^VIX': 'VIX - Volatility Index',
+    # Aggiungi altri indici qui:
+    # '^GSPC': 'S&P 500 Index',
+    # '^DJI': 'Dow Jones Index',
+    # '^IXIC': 'Nasdaq Composite',
+    # '^GDAXI': 'DAX (Germania)',
+    # '^FTSE': 'FTSE 100 (UK)',
+    # '^N225': 'Nikkei 225 (Giappone)',
+}
+
+COMMODITIES = {
+    'GC=F': 'Gold Futures',
+    'SI=F': 'Silver Futures',
+    'CL=F': 'Crude Oil WTI',
+    'NG=F': 'Natural Gas',
+    'HG=F': 'Copper',
+    'ZC=F': 'Corn',
+    'ZS=F': 'Soybeans',
+    'ZW=F': 'Wheat',
+    # Aggiungi altre materie prime:
+    # 'PL=F': 'Platinum',
+    # 'PA=F': 'Palladium',
+    # 'RB=F': 'RBOB Gasoline',
+    # 'HO=F': 'Heating Oil',
+    # 'CT=F': 'Cotton',
+    # 'SB=F': 'Sugar',
+    # 'KC=F': 'Coffee',
+    # 'CC=F': 'Cocoa',
+}
+
+CRYPTO = {
+    'BTC-USD': 'Bitcoin',
+    'ETH-USD': 'Ethereum',
+    'BNB-USD': 'Binance Coin',
+    'SOL-USD': 'Solana',
+    'XRP-USD': 'Ripple',
+    # Aggiungi altre crypto:
+    # 'ADA-USD': 'Cardano',
+    # 'DOGE-USD': 'Dogecoin',
+    # 'DOT-USD': 'Polkadot',
+    # 'MATIC-USD': 'Polygon',
+    # 'AVAX-USD': 'Avalanche',
+    # 'LINK-USD': 'Chainlink',
+    # 'UNI-USD': 'Uniswap',
+}
+
+FOREX = {
+    'EURUSD=X': 'EUR/USD',
+    'GBPUSD=X': 'GBP/USD',
+    'USDJPY=X': 'USD/JPY',
+    'AUDUSD=X': 'AUD/USD',
+    'USDCAD=X': 'USD/CAD',
+    # Aggiungi altre coppie forex:
+    # 'USDCHF=X': 'USD/CHF',
+    # 'NZDUSD=X': 'NZD/USD',
+    # 'EURGBP=X': 'EUR/GBP',
+    # 'EURJPY=X': 'EUR/JPY',
+    # 'GBPJPY=X': 'GBP/JPY',
+}
+
+# ===== TIMING =====
+# Intervallo tra aggiornamenti automatici (in ore)
+UPDATE_INTERVAL_HOURS = 4
+
+# Delay tra richieste singole (in secondi)
+# Aumenta se ricevi errori 429
+DELAY_BETWEEN_REQUESTS = 4
+
+# Delay tra batch (in secondi)
+# Aumenta se ricevi ancora errori 429
+BATCH_DELAY = 90
+
+# Numero di simboli per batch
+# Riduci se ricevi errori 429
+BATCH_SIZE = 8
+
+# Numero massimo di retry per richieste fallite
+MAX_RETRIES = 3
+
+# ===== MESSAGGI =====
+# Personalizza i messaggi del bot
+
+# Titolo del messaggio di aggiornamento
+MESSAGE_TITLE = "📊 AGGIORNAMENTO MERCATI"
+
+# Emoji per variazioni positive/negative/neutre
+EMOJI_UP = "🟢"
+EMOJI_DOWN = "🔴"
+EMOJI_NEUTRAL = "⚪"
+
+# Mostra volume nel messaggio? (True/False)
+SHOW_VOLUME = False
+
+# ===== CACHE =====
+# File dove salvare la cache
+CACHE_FILE = 'market_cache.json'
+
+# La cache è valida per quante ore?
+# (dovrebbe essere uguale a UPDATE_INTERVAL_HOURS)
+CACHE_VALIDITY_HOURS = UPDATE_INTERVAL_HOURS
+
+# ===== LOGGING =====
+# Livello di log: DEBUG, INFO, WARNING, ERROR
+LOG_LEVEL = 'INFO'
+
+# ===== FILTRI =====
+# Filtra simboli per orari di mercato (opzionale, avanzato)
+# Se True, il bot controllerà se il mercato è aperto prima di aggiornare
+CHECK_MARKET_HOURS = False
+
+# Soglia minima per considerare una variazione significativa
+# (usata solo per log, non filtra i dati mostrati)
+SIGNIFICANT_CHANGE_THRESHOLD = 2.0  # percentuale
+
+# ===== NOTIFICHE SPECIALI =====
+# Alert su movimenti significativi (opzionale)
+ENABLE_ALERTS = False
+
+# Soglia per alert (percentuale)
+ALERT_THRESHOLD = 5.0
+
+# Simboli da monitorare per alert (lascia vuoto per monitorare tutti)
+ALERT_SYMBOLS = [
+    'BTC-USD',
+    'ES=F',
+    '^VIX',
+]
+
+# ===== EXPORT =====
+# Costruisci il dizionario completo dei simboli
+MARKET_SYMBOLS = {
+    'Indici Futures': INDICES,
+    'Materie Prime': COMMODITIES,
+    'Crypto': CRYPTO,
+    'Forex': FOREX,
+}
+
+# Rimuovi categorie vuote
+MARKET_SYMBOLS = {k: v for k, v in MARKET_SYMBOLS.items() if v}
+
+
+# ===== UTILITY FUNCTIONS =====
+def get_total_symbols():
+    """Restituisce il numero totale di simboli monitorati"""
+    return sum(len(symbols) for symbols in MARKET_SYMBOLS.values())
+
+
+def get_symbols_list():
+    """Restituisce una lista di tutti i simboli"""
+    all_symbols = []
+    for symbols in MARKET_SYMBOLS.values():
+        all_symbols.extend(symbols.keys())
+    return all_symbols
+
+
+def validate_config():
+    """Valida la configurazione"""
+    issues = []
+    
+    if UPDATE_INTERVAL_HOURS < 1:
+        issues.append("UPDATE_INTERVAL_HOURS deve essere >= 1")
+    
+    if DELAY_BETWEEN_REQUESTS < 2:
+        issues.append("DELAY_BETWEEN_REQUESTS consigliato >= 2 secondi")
+    
+    if BATCH_SIZE < 1:
+        issues.append("BATCH_SIZE deve essere >= 1")
+    
+    if get_total_symbols() == 0:
+        issues.append("Nessun simbolo configurato!")
+    
+    if get_total_symbols() > 100:
+        issues.append(f"Attenzione: {get_total_symbols()} simboli potrebbero causare rate limiting")
+    
+    return issues
+
+
+# Validazione automatica
+if __name__ == '__main__':
+    print(f"📊 Configurazione Bot Mercati")
+    print(f"━━━━━━━━━━━━━━━━━━━━━━━━")
+    print(f"Totale simboli: {get_total_symbols()}")
+    print(f"Intervallo aggiornamenti: {UPDATE_INTERVAL_HOURS}h")
+    print(f"Delay tra richieste: {DELAY_BETWEEN_REQUESTS}s")
+    print(f"Batch size: {BATCH_SIZE}")
+    print(f"\nCategorie:")
+    for category, symbols in MARKET_SYMBOLS.items():
+        print(f"  • {category}: {len(symbols)} simboli")
+    
+    issues = validate_config()
+    if issues:
+        print(f"\n⚠️  Problemi rilevati:")
+        for issue in issues:
+            print(f"  • {issue}")
+    else:
+        print(f"\n✅ Configurazione valida!")
