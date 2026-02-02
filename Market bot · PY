@@ -1,0 +1,424 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+Bot Telegram per aggiornamenti mercati finanziari
+Supporta: Futures Indici, Materie Prime, Crypto, Forex
+Con gestione rate limiting e caching
+"""
+
+import os
+import time
+import json
+import logging
+from datetime import datetime, timedelta
+from typing import Dict, Optional, List
+
+import yfinance as yf
+from telegram import Update
+from telegram.ext import Application, CommandHandler, ContextTypes
+
+# ===== CONFIGURAZIONE =====
+logging.basicConfig(
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    level=logging.INFO
+)
+logger = logging.getLogger(__name__)
+
+# Telegram Bot Token (da Railway environment variables)
+BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN', 'YOUR_BOT_TOKEN_HERE')
+CHAT_ID = os.getenv('TELEGRAM_CHAT_ID', 'YOUR_CHAT_ID_HERE')
+
+# Configurazione aggiornamenti
+UPDATE_INTERVAL_HOURS = 4
+DELAY_BETWEEN_REQUESTS = 4  # secondi tra ogni richiesta
+BATCH_DELAY = 90  # secondi tra batch
+BATCH_SIZE = 8  # simboli per batch
+
+# File cache
+CACHE_FILE = 'market_cache.json'
+
+# ===== SIMBOLI DA MONITORARE =====
+MARKET_SYMBOLS = {
+    'Indici Futures': {
+        'ES=F': 'S&P 500',
+        'NQ=F': 'Nasdaq 100',
+        'YM=F': 'Dow Jones',
+        'RTY=F': 'Russell 2000',
+        'VIX': 'Volatility Index',
+    },
+    'Materie Prime': {
+        'GC=F': 'Gold',
+        'SI=F': 'Silver',
+        'CL=F': 'Crude Oil WTI',
+        'NG=F': 'Natural Gas',
+        'HG=F': 'Copper',
+        'ZC=F': 'Corn',
+        'ZS=F': 'Soybeans',
+        'ZW=F': 'Wheat',
+    },
+    'Crypto': {
+        'BTC-USD': 'Bitcoin',
+        'ETH-USD': 'Ethereum',
+        'BNB-USD': 'Binance Coin',
+        'SOL-USD': 'Solana',
+        'XRP-USD': 'Ripple',
+    },
+    'Forex': {
+        'EURUSD=X': 'EUR/USD',
+        'GBPUSD=X': 'GBP/USD',
+        'USDJPY=X': 'USD/JPY',
+        'AUDUSD=X': 'AUD/USD',
+        'USDCAD=X': 'USD/CAD',
+    }
+}
+
+
+# ===== GESTIONE CACHE =====
+def load_cache() -> Dict:
+    """Carica la cache dal file"""
+    try:
+        if os.path.exists(CACHE_FILE):
+            with open(CACHE_FILE, 'r') as f:
+                return json.load(f)
+    except Exception as e:
+        logger.error(f"Errore caricamento cache: {e}")
+    return {}
+
+
+def save_cache(data: Dict):
+    """Salva i dati nella cache"""
+    try:
+        data['_last_update'] = datetime.now().isoformat()
+        with open(CACHE_FILE, 'w') as f:
+            json.dump(data, f, indent=2)
+        logger.info("Cache salvata con successo")
+    except Exception as e:
+        logger.error(f"Errore salvataggio cache: {e}")
+
+
+def is_cache_valid(cache: Dict, hours: int = UPDATE_INTERVAL_HOURS) -> bool:
+    """Verifica se la cache è ancora valida"""
+    if not cache or '_last_update' not in cache:
+        return False
+    
+    try:
+        last_update = datetime.fromisoformat(cache['_last_update'])
+        return datetime.now() - last_update < timedelta(hours=hours)
+    except:
+        return False
+
+
+# ===== RECUPERO DATI MERCATO =====
+def get_market_data(symbol: str, max_retries: int = 3) -> Optional[Dict]:
+    """
+    Recupera dati per un singolo simbolo con retry logic
+    """
+    for attempt in range(max_retries):
+        try:
+            ticker = yf.Ticker(symbol)
+            
+            # Prova prima con .info
+            try:
+                data = ticker.info
+                if data and 'regularMarketPrice' in data:
+                    return {
+                        'price': data.get('regularMarketPrice', 0),
+                        'change': data.get('regularMarketChange', 0),
+                        'change_percent': data.get('regularMarketChangePercent', 0),
+                        'volume': data.get('regularMarketVolume', 0),
+                        'timestamp': datetime.now().isoformat()
+                    }
+            except:
+                pass
+            
+            # Fallback: usa history
+            hist = ticker.history(period='1d')
+            if not hist.empty:
+                current_price = hist['Close'].iloc[-1]
+                prev_close = hist['Open'].iloc[0]
+                change = current_price - prev_close
+                change_percent = (change / prev_close) * 100 if prev_close != 0 else 0
+                
+                return {
+                    'price': float(current_price),
+                    'change': float(change),
+                    'change_percent': float(change_percent),
+                    'volume': float(hist['Volume'].iloc[-1]) if 'Volume' in hist else 0,
+                    'timestamp': datetime.now().isoformat()
+                }
+            
+            return None
+            
+        except Exception as e:
+            logger.warning(f"Tentativo {attempt + 1}/{max_retries} fallito per {symbol}: {e}")
+            if attempt < max_retries - 1:
+                wait_time = (2 ** attempt) * 30  # 30s, 60s, 120s
+                logger.info(f"Attendo {wait_time}s prima di riprovare...")
+                time.sleep(wait_time)
+            else:
+                logger.error(f"❌ Impossibile recuperare {symbol} dopo {max_retries} tentativi")
+    
+    return None
+
+
+def update_all_markets() -> Dict:
+    """
+    Aggiorna tutti i mercati con batch e rate limiting
+    """
+    logger.info("🔄 Inizio aggiornamento mercati...")
+    all_data = {}
+    total_symbols = sum(len(symbols) for symbols in MARKET_SYMBOLS.values())
+    current_symbol = 0
+    
+    for category, symbols in MARKET_SYMBOLS.items():
+        logger.info(f"📊 Categoria: {category}")
+        all_data[category] = {}
+        
+        symbol_list = list(symbols.items())
+        
+        # Processa in batch
+        for i in range(0, len(symbol_list), BATCH_SIZE):
+            batch = symbol_list[i:i+BATCH_SIZE]
+            batch_num = i // BATCH_SIZE + 1
+            total_batches = (len(symbol_list) + BATCH_SIZE - 1) // BATCH_SIZE
+            
+            logger.info(f"  📦 Batch {batch_num}/{total_batches} ({len(batch)} simboli)")
+            
+            for symbol, name in batch:
+                current_symbol += 1
+                logger.info(f"  [{current_symbol}/{total_symbols}] Recupero {symbol} ({name})...")
+                
+                data = get_market_data(symbol)
+                
+                if data:
+                    all_data[category][symbol] = {
+                        'name': name,
+                        **data
+                    }
+                    logger.info(f"    ✅ {name}: ${data['price']:.2f} ({data['change_percent']:+.2f}%)")
+                else:
+                    all_data[category][symbol] = {
+                        'name': name,
+                        'price': None,
+                        'error': 'Dati non disponibili'
+                    }
+                    logger.warning(f"    ⚠️  {name}: Dati non disponibili")
+                
+                # Delay tra simboli
+                if current_symbol < total_symbols:
+                    time.sleep(DELAY_BETWEEN_REQUESTS)
+            
+            # Delay tra batch (più lungo)
+            if i + BATCH_SIZE < len(symbol_list):
+                logger.info(f"  ⏸️  Pausa {BATCH_DELAY}s prima del prossimo batch...")
+                time.sleep(BATCH_DELAY)
+    
+    logger.info("✅ Aggiornamento completato!")
+    return all_data
+
+
+# ===== FORMATTAZIONE MESSAGGI =====
+def format_market_message(data: Dict) -> str:
+    """
+    Formatta i dati di mercato in un messaggio Telegram leggibile
+    """
+    message_parts = ["📊 <b>AGGIORNAMENTO MERCATI</b>\n"]
+    
+    timestamp = datetime.now().strftime("%d/%m/%Y %H:%M")
+    message_parts.append(f"🕐 {timestamp}\n")
+    
+    for category, symbols in data.items():
+        if category.startswith('_'):  # Skip metadata
+            continue
+            
+        message_parts.append(f"\n<b>━━━ {category.upper()} ━━━</b>")
+        
+        for symbol, info in symbols.items():
+            name = info.get('name', symbol)
+            price = info.get('price')
+            
+            if price is None or price == 0:
+                message_parts.append(f"• {name}: ⏳ <i>Non disponibile</i>")
+                continue
+            
+            change_percent = info.get('change_percent', 0)
+            
+            # Emoji in base alla variazione
+            if change_percent > 0:
+                emoji = "🟢"
+                sign = "+"
+            elif change_percent < 0:
+                emoji = "🔴"
+                sign = ""
+            else:
+                emoji = "⚪"
+                sign = ""
+            
+            # Formatta prezzo in base al valore
+            if price < 1:
+                price_str = f"${price:.4f}"
+            elif price < 100:
+                price_str = f"${price:.2f}"
+            else:
+                price_str = f"${price:,.2f}"
+            
+            message_parts.append(
+                f"{emoji} <b>{name}</b>\n"
+                f"   {price_str} ({sign}{change_percent:.2f}%)"
+            )
+    
+    message_parts.append("\n━━━━━━━━━━━━━━━━━")
+    message_parts.append(f"Prossimo aggiornamento: {UPDATE_INTERVAL_HOURS}h")
+    
+    return "\n".join(message_parts)
+
+
+# ===== COMANDI BOT =====
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Comando /start"""
+    await update.message.reply_text(
+        "👋 <b>Bot Mercati Finanziari Attivo!</b>\n\n"
+        "Comandi disponibili:\n"
+        "/update - Forza aggiornamento immediato\n"
+        "/status - Stato bot e ultima sincronizzazione\n"
+        "/markets - Visualizza mercati monitorati\n\n"
+        f"⏰ Aggiornamento automatico ogni {UPDATE_INTERVAL_HOURS} ore",
+        parse_mode='HTML'
+    )
+
+
+async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Comando /status"""
+    cache = load_cache()
+    
+    if is_cache_valid(cache):
+        last_update = datetime.fromisoformat(cache['_last_update'])
+        next_update = last_update + timedelta(hours=UPDATE_INTERVAL_HOURS)
+        time_until = next_update - datetime.now()
+        
+        hours = int(time_until.total_seconds() // 3600)
+        minutes = int((time_until.total_seconds() % 3600) // 60)
+        
+        status_msg = (
+            "✅ <b>Bot Attivo</b>\n\n"
+            f"📅 Ultimo aggiornamento: {last_update.strftime('%d/%m/%Y %H:%M')}\n"
+            f"⏰ Prossimo aggiornamento: tra {hours}h {minutes}m\n"
+            f"🔄 Intervallo: {UPDATE_INTERVAL_HOURS} ore"
+        )
+    else:
+        status_msg = (
+            "⚠️  <b>Cache non valida o assente</b>\n\n"
+            "Usa /update per forzare un aggiornamento"
+        )
+    
+    await update.message.reply_text(status_msg, parse_mode='HTML')
+
+
+async def markets_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Comando /markets - lista mercati monitorati"""
+    msg_parts = ["📋 <b>MERCATI MONITORATI</b>\n"]
+    
+    total = 0
+    for category, symbols in MARKET_SYMBOLS.items():
+        msg_parts.append(f"\n<b>{category}</b> ({len(symbols)})")
+        for symbol, name in symbols.items():
+            msg_parts.append(f"  • {name} ({symbol})")
+            total += 1
+    
+    msg_parts.append(f"\n<b>Totale: {total} simboli</b>")
+    
+    await update.message.reply_text("\n".join(msg_parts), parse_mode='HTML')
+
+
+async def force_update(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Comando /update - forza aggiornamento"""
+    await update.message.reply_text("🔄 Aggiornamento in corso... (può richiedere alcuni minuti)")
+    
+    try:
+        data = update_all_markets()
+        save_cache(data)
+        
+        message = format_market_message(data)
+        await update.message.reply_text(message, parse_mode='HTML')
+        
+    except Exception as e:
+        logger.error(f"Errore durante l'aggiornamento: {e}")
+        await update.message.reply_text(
+            f"❌ Errore durante l'aggiornamento:\n{str(e)}",
+            parse_mode='HTML'
+        )
+
+
+async def scheduled_update(context: ContextTypes.DEFAULT_TYPE):
+    """Aggiornamento programmato automatico"""
+    logger.info("⏰ Esecuzione aggiornamento programmato...")
+    
+    try:
+        # Controlla se la cache è ancora valida
+        cache = load_cache()
+        if is_cache_valid(cache):
+            logger.info("Cache ancora valida, skip aggiornamento")
+            return
+        
+        # Aggiorna i dati
+        data = update_all_markets()
+        save_cache(data)
+        
+        # Invia messaggio
+        message = format_market_message(data)
+        await context.bot.send_message(
+            chat_id=CHAT_ID,
+            text=message,
+            parse_mode='HTML'
+        )
+        
+        logger.info("✅ Aggiornamento programmato completato e inviato")
+        
+    except Exception as e:
+        logger.error(f"❌ Errore aggiornamento programmato: {e}")
+        await context.bot.send_message(
+            chat_id=CHAT_ID,
+            text=f"⚠️ Errore aggiornamento automatico:\n{str(e)}"
+        )
+
+
+# ===== MAIN =====
+def main():
+    """Avvia il bot"""
+    logger.info("🚀 Avvio Bot Mercati Finanziari...")
+    
+    # Verifica configurazione
+    if BOT_TOKEN == 'YOUR_BOT_TOKEN_HERE':
+        logger.error("❌ TELEGRAM_BOT_TOKEN non configurato!")
+        return
+    
+    if CHAT_ID == 'YOUR_CHAT_ID_HERE':
+        logger.error("❌ TELEGRAM_CHAT_ID non configurato!")
+        return
+    
+    # Crea applicazione
+    application = Application.builder().token(BOT_TOKEN).build()
+    
+    # Aggiungi handlers
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(CommandHandler("status", status))
+    application.add_handler(CommandHandler("markets", markets_list))
+    application.add_handler(CommandHandler("update", force_update))
+    
+    # Configura job per aggiornamenti automatici
+    job_queue = application.job_queue
+    job_queue.run_repeating(
+        scheduled_update,
+        interval=UPDATE_INTERVAL_HOURS * 3600,  # converti ore in secondi
+        first=10  # primo aggiornamento dopo 10 secondi
+    )
+    
+    logger.info(f"✅ Bot configurato. Aggiornamenti ogni {UPDATE_INTERVAL_HOURS} ore")
+    logger.info(f"📊 Monitoraggio {sum(len(s) for s in MARKET_SYMBOLS.values())} simboli")
+    
+    # Avvia il bot
+    application.run_polling(allowed_updates=Update.ALL_TYPES)
+
+
+if __name__ == '__main__':
+    main()
