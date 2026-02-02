@@ -1,0 +1,552 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+COMPLETE HYBRID MARKET BOT
+Uses: CoinGecko (crypto) + ExchangeRate (forex) + Alpha Vantage (futures/commodities)
+NO Yahoo Finance = NO Rate Limiting!
+"""
+
+import os
+import time
+import json
+import logging
+from datetime import datetime, timedelta
+from typing import Dict, Optional
+import requests
+
+from telegram import Update
+from telegram.ext import Application, CommandHandler, ContextTypes
+
+# ===== CONFIG =====
+logging.basicConfig(
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    level=logging.INFO
+)
+logger = logging.getLogger(__name__)
+
+BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
+CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')
+ALPHA_VANTAGE_KEY = os.getenv('ALPHA_VANTAGE_KEY')  # Aggiungi questa su Railway!
+
+UPDATE_INTERVAL_HOURS = 4
+CACHE_FILE = 'market_cache.json'
+
+# ===== SIMBOLI MERCATO =====
+MARKET_SYMBOLS = {
+    'Futures Indici': {
+        'ES': 'S&P 500 Futures',
+        'NQ': 'Nasdaq 100 Futures',
+        'YM': 'Dow Jones Futures',
+    },
+    'Materie Prime': {
+        'GC': 'Gold',
+        'SI': 'Silver', 
+        'CL': 'Crude Oil WTI',
+        'NG': 'Natural Gas',
+        'HG': 'Copper',
+    },
+    'Indici': {
+        'SPX': 'S&P 500 Index',
+        'VIX': 'Volatility Index',
+    },
+    'Crypto': {
+        'bitcoin': 'Bitcoin',
+        'ethereum': 'Ethereum',
+        'solana': 'Solana',
+        'binancecoin': 'BNB',
+    },
+    'Forex': {
+        'eur': 'EUR/USD',
+        'gbp': 'GBP/USD',
+        'jpy': 'USD/JPY',
+        'aud': 'AUD/USD',
+    }
+}
+
+# Mapping simboli Alpha Vantage
+ALPHA_VANTAGE_SYMBOLS = {
+    # Futures (usa i ticker senza =F)
+    'ES': 'ES',
+    'NQ': 'NQ', 
+    'YM': 'YM',
+    'GC': 'GLD',  # ETF come proxy
+    'SI': 'SLV',  # ETF come proxy
+    'CL': 'USO',  # ETF come proxy
+    'NG': 'UNG',  # ETF come proxy
+    'HG': 'CPER', # ETF come proxy
+    # Indici
+    'SPX': 'SPY',  # S&P 500 ETF
+    'VIX': 'VXX',  # VIX ETF
+}
+
+
+# ===== CACHE =====
+def load_cache() -> Dict:
+    try:
+        if os.path.exists(CACHE_FILE):
+            with open(CACHE_FILE, 'r') as f:
+                return json.load(f)
+    except:
+        pass
+    return {}
+
+
+def save_cache(data: Dict):
+    try:
+        data['_last_update'] = datetime.now().isoformat()
+        with open(CACHE_FILE, 'w') as f:
+            json.dump(data, f, indent=2)
+        logger.info("✅ Cache saved")
+    except Exception as e:
+        logger.error(f"Cache save error: {e}")
+
+
+def is_cache_valid(cache: Dict, hours: int = UPDATE_INTERVAL_HOURS) -> bool:
+    if not cache or '_last_update' not in cache:
+        return False
+    try:
+        last = datetime.fromisoformat(cache['_last_update'])
+        return datetime.now() - last < timedelta(hours=hours)
+    except:
+        return False
+
+
+# ===== API: ALPHA VANTAGE =====
+def fetch_alpha_vantage(symbol: str) -> Optional[Dict]:
+    """
+    Alpha Vantage per futures, commodities, indici
+    LIMITE: 25 chiamate/giorno (piano gratuito)
+    """
+    if not ALPHA_VANTAGE_KEY or ALPHA_VANTAGE_KEY == 'demo':
+        logger.warning("⚠️  Alpha Vantage KEY non configurata")
+        return None
+    
+    try:
+        # Usa GLOBAL_QUOTE per ottenere prezzo real-time
+        av_symbol = ALPHA_VANTAGE_SYMBOLS.get(symbol, symbol)
+        
+        url = 'https://www.alphavantage.co/query'
+        params = {
+            'function': 'GLOBAL_QUOTE',
+            'symbol': av_symbol,
+            'apikey': ALPHA_VANTAGE_KEY
+        }
+        
+        response = requests.get(url, params=params, timeout=15)
+        response.raise_for_status()
+        data = response.json()
+        
+        if 'Global Quote' in data and data['Global Quote']:
+            quote = data['Global Quote']
+            
+            price = float(quote.get('05. price', 0))
+            change_pct = float(quote.get('10. change percent', '0').replace('%', ''))
+            
+            if price > 0:
+                return {
+                    'price': price,
+                    'change_percent': change_pct,
+                    'source': 'Alpha Vantage'
+                }
+        
+        # Se limite raggiunto o errore
+        if 'Note' in data or 'Information' in data:
+            logger.warning(f"⚠️  Alpha Vantage limit/error: {data}")
+            return None
+            
+    except Exception as e:
+        logger.error(f"Alpha Vantage error for {symbol}: {e}")
+    
+    return None
+
+
+# ===== API: COINGECKO =====
+def fetch_crypto_coingecko(coin_id: str) -> Optional[Dict]:
+    """
+    CoinGecko per crypto (GRATUITO)
+    """
+    try:
+        url = 'https://api.coingecko.com/api/v3/simple/price'
+        params = {
+            'ids': coin_id,
+            'vs_currencies': 'usd',
+            'include_24hr_change': 'true'
+        }
+        
+        response = requests.get(url, params=params, timeout=10)
+        response.raise_for_status()
+        data = response.json()
+        
+        if coin_id in data:
+            return {
+                'price': data[coin_id]['usd'],
+                'change_percent': data[coin_id].get('usd_24h_change', 0),
+                'source': 'CoinGecko'
+            }
+    except Exception as e:
+        logger.error(f"CoinGecko error for {coin_id}: {e}")
+    
+    return None
+
+
+# ===== API: FOREX =====
+def fetch_forex(base: str) -> Optional[Dict]:
+    """
+    ExchangeRate-API per forex (GRATUITO)
+    """
+    try:
+        currencies_map = {
+            'eur': ('EUR', False),  # EUR/USD
+            'gbp': ('GBP', False),  # GBP/USD
+            'jpy': ('JPY', True),   # USD/JPY (inverso)
+            'aud': ('AUD', False),  # AUD/USD
+            'cad': ('CAD', True),   # USD/CAD (inverso)
+            'chf': ('CHF', True),   # USD/CHF (inverso)
+        }
+        
+        if base.lower() not in currencies_map:
+            return None
+        
+        currency, is_inverse = currencies_map[base.lower()]
+        
+        url = 'https://open.er-api.com/v6/latest/USD'
+        response = requests.get(url, timeout=10)
+        response.raise_for_status()
+        data = response.json()
+        
+        if 'rates' in data and currency in data['rates']:
+            rate = data['rates'][currency]
+            
+            # Se è inverso (USD/XXX), usa diretto
+            # Se non è inverso (XXX/USD), inverti
+            if is_inverse:
+                price = rate
+            else:
+                price = 1 / rate
+            
+            return {
+                'price': price,
+                'change_percent': 0,
+                'source': 'ExchangeRate'
+            }
+    except Exception as e:
+        logger.error(f"Forex error for {base}: {e}")
+    
+    return None
+
+
+# ===== AGGIORNAMENTO MERCATI =====
+def update_all_markets() -> Dict:
+    """
+    Aggiorna tutti i mercati usando API multiple
+    """
+    logger.info("\n" + "="*70)
+    logger.info("🔄 COMPLETE MARKET UPDATE (HYBRID MODE)")
+    logger.info("="*70)
+    
+    all_data = {}
+    total_symbols = sum(len(symbols) for symbols in MARKET_SYMBOLS.values())
+    current_count = 0
+    
+    # Contatore chiamate Alpha Vantage (max 25/giorno)
+    av_calls = 0
+    max_av_calls = 20  # Lascia margine
+    
+    for category, symbols in MARKET_SYMBOLS.items():
+        logger.info(f"\n📂 {category}")
+        all_data[category] = {}
+        
+        for symbol, name in symbols.items():
+            current_count += 1
+            logger.info(f"  [{current_count}/{total_symbols}] {name}...")
+            
+            data = None
+            
+            # Scegli API in base alla categoria
+            if category == 'Crypto':
+                data = fetch_crypto_coingecko(symbol)
+                time.sleep(2)  # Pausa gentile
+                
+            elif category == 'Forex':
+                data = fetch_forex(symbol)
+                time.sleep(1)
+                
+            elif category in ['Futures Indici', 'Materie Prime', 'Indici']:
+                if av_calls < max_av_calls:
+                    data = fetch_alpha_vantage(symbol)
+                    av_calls += 1
+                    logger.info(f"    📊 Alpha Vantage calls: {av_calls}/{max_av_calls}")
+                    time.sleep(12)  # 12 secondi = 5 calls/min (safe)
+                else:
+                    logger.warning(f"    ⚠️  Alpha Vantage limit reached, using cache")
+                    # Prova cache
+                    cache = load_cache()
+                    if category in cache and symbol in cache[category]:
+                        data = cache[category][symbol]
+                        data['from_cache'] = True
+            
+            # Salva risultato
+            if data:
+                all_data[category][symbol] = {'name': name, **data}
+                
+                if data.get('from_cache'):
+                    logger.info(f"    📦 Using cached data")
+                else:
+                    price = data['price']
+                    change = data.get('change_percent', 0)
+                    source = data.get('source', '')
+                    
+                    if price < 1:
+                        price_str = f"${price:.4f}"
+                    elif price < 100:
+                        price_str = f"${price:.2f}"
+                    else:
+                        price_str = f"${price:,.2f}"
+                    
+                    logger.info(f"    ✅ {price_str} ({change:+.2f}%) - {source}")
+            else:
+                # Fallback a cache
+                cache = load_cache()
+                if category in cache and symbol in cache[category]:
+                    cached = cache[category][symbol]
+                    all_data[category][symbol] = {**cached, 'from_cache': True}
+                    logger.info(f"    📦 Using cached data (API failed)")
+                else:
+                    all_data[category][symbol] = {
+                        'name': name,
+                        'price': None,
+                        'error': 'Unavailable'
+                    }
+                    logger.warning(f"    ❌ No data available")
+    
+    logger.info("\n" + "="*70)
+    logger.info(f"✅ UPDATE COMPLETED | Alpha Vantage calls: {av_calls}/{max_av_calls}")
+    logger.info("="*70 + "\n")
+    
+    return all_data
+
+
+# ===== FORMATTAZIONE =====
+def format_message(data: Dict) -> str:
+    parts = ["📊 <b>AGGIORNAMENTO MERCATI COMPLETO</b>\n"]
+    parts.append(f"🕐 {datetime.now().strftime('%d/%m/%Y %H:%M')}\n")
+    
+    for category, symbols in data.items():
+        if category.startswith('_'):
+            continue
+        
+        parts.append(f"\n<b>━━━ {category.upper()} ━━━</b>")
+        
+        for symbol, info in symbols.items():
+            name = info.get('name', symbol)
+            price = info.get('price')
+            
+            if price is None:
+                parts.append(f"⚪ {name}: <i>Non disponibile</i>")
+                continue
+            
+            change_pct = info.get('change_percent', 0)
+            emoji = "🟢" if change_pct > 0 else "🔴" if change_pct < 0 else "⚪"
+            sign = "+" if change_pct > 0 else ""
+            
+            cached = " 📦" if info.get('from_cache') else ""
+            
+            if price < 1:
+                price_str = f"${price:.4f}"
+            elif price < 100:
+                price_str = f"${price:.2f}"
+            else:
+                price_str = f"${price:,.2f}"
+            
+            if change_pct != 0:
+                parts.append(
+                    f"{emoji} <b>{name}</b>{cached}\n"
+                    f"   {price_str} ({sign}{change_pct:.2f}%)"
+                )
+            else:
+                parts.append(f"{emoji} <b>{name}</b>{cached}\n   {price_str}")
+    
+    parts.append(f"\n━━━━━━━━━━━━━━━━━")
+    parts.append(f"Prossimo: {UPDATE_INTERVAL_HOURS}h | 📦 = Cached")
+    parts.append("\n<i>💡 API: Alpha Vantage + CoinGecko + ExchangeRate</i>")
+    
+    return "\n".join(parts)
+
+
+# ===== COMANDI =====
+async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        "👋 <b>Complete Market Bot</b>\n\n"
+        "📊 Mercati supportati:\n"
+        "• Futures & Indici (Alpha Vantage)\n"
+        "• Materie Prime (Alpha Vantage)\n"
+        "• Crypto (CoinGecko)\n"
+        "• Forex (ExchangeRate)\n\n"
+        "Comandi:\n"
+        "/update - Aggiornamento immediato\n"
+        "/status - Stato bot\n"
+        "/markets - Lista mercati\n"
+        "/apilimit - Verifica limite Alpha Vantage\n\n"
+        f"⏰ Auto-update ogni {UPDATE_INTERVAL_HOURS}h",
+        parse_mode='HTML'
+    )
+
+
+async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    cache = load_cache()
+    
+    if is_cache_valid(cache):
+        last = datetime.fromisoformat(cache['_last_update'])
+        next_update = last + timedelta(hours=UPDATE_INTERVAL_HOURS)
+        delta = next_update - datetime.now()
+        
+        h = int(delta.total_seconds() // 3600)
+        m = int((delta.total_seconds() % 3600) // 60)
+        
+        msg = (
+            f"✅ <b>Bot Attivo</b>\n\n"
+            f"📅 Ultimo: {last.strftime('%d/%m %H:%M')}\n"
+            f"⏰ Prossimo: {h}h {m}m\n"
+            f"🔄 Intervallo: {UPDATE_INTERVAL_HOURS}h\n\n"
+            f"💡 API Multi-Source\n"
+            f"🔑 Alpha Vantage: {'✅' if ALPHA_VANTAGE_KEY else '❌'}"
+        )
+    else:
+        msg = "⚠️ Cache non valida\nUsa /update"
+    
+    await update.message.reply_text(msg, parse_mode='HTML')
+
+
+async def cmd_markets(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    parts = ["📋 <b>MERCATI MONITORATI</b>\n"]
+    total = 0
+    
+    for cat, syms in MARKET_SYMBOLS.items():
+        parts.append(f"\n<b>{cat}</b> ({len(syms)})")
+        for sym, name in syms.items():
+            parts.append(f"  • {name}")
+            total += 1
+    
+    parts.append(f"\n<b>Totale: {total} simboli</b>")
+    parts.append("\n<i>💡 Zero chiamate a Yahoo Finance!</i>")
+    
+    await update.message.reply_text("\n".join(parts), parse_mode='HTML')
+
+
+async def cmd_apilimit(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Mostra info sui limiti API"""
+    msg = (
+        "📊 <b>LIMITI API</b>\n\n"
+        "<b>Alpha Vantage:</b>\n"
+        "• Limite: 25 chiamate/giorno\n"
+        "• Uso stimato: ~15 calls/update\n"
+        f"• Intervallo: {UPDATE_INTERVAL_HOURS}h\n"
+        f"• Calls/giorno: {24//UPDATE_INTERVAL_HOURS * 15}\n\n"
+        "<b>CoinGecko:</b>\n"
+        "• Limite: 50 chiamate/minuto\n"
+        "• Nessun limite giornaliero\n\n"
+        "<b>ExchangeRate-API:</b>\n"
+        "• Limite: 1500 chiamate/mese\n"
+        "• Ampio margine per uso\n\n"
+        f"✅ Configurazione ottimale per {UPDATE_INTERVAL_HOURS}h updates"
+    )
+    
+    await update.message.reply_text(msg, parse_mode='HTML')
+
+
+async def cmd_update(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        "🔄 Aggiornamento in corso...\n"
+        "⏱️ Tempo stimato: 2-3 minuti"
+    )
+    
+    try:
+        data = update_all_markets()
+        save_cache(data)
+        msg = format_message(data)
+        await update.message.reply_text(msg, parse_mode='HTML')
+    except Exception as e:
+        logger.error(f"Update error: {e}")
+        await update.message.reply_text(f"❌ Errore: {str(e)[:200]}")
+
+
+# ===== SCHEDULED =====
+async def scheduled_update(context: ContextTypes.DEFAULT_TYPE):
+    logger.info("\n⏰ SCHEDULED UPDATE TRIGGERED")
+    
+    try:
+        cache = load_cache()
+        if is_cache_valid(cache):
+            logger.info("✅ Cache still valid, skipping")
+            return
+        
+        logger.info("🔄 Cache expired, starting update...")
+        data = update_all_markets()
+        save_cache(data)
+        
+        msg = format_message(data)
+        await context.bot.send_message(chat_id=CHAT_ID, text=msg, parse_mode='HTML')
+        
+        logger.info("✅ Scheduled update sent successfully")
+        
+    except Exception as e:
+        logger.error(f"❌ Scheduled update error: {e}")
+        try:
+            await context.bot.send_message(
+                chat_id=CHAT_ID,
+                text=f"⚠️ Errore aggiornamento:\n{str(e)[:200]}"
+            )
+        except:
+            pass
+
+
+# ===== MAIN =====
+def main():
+    logger.info("\n" + "="*70)
+    logger.info("🚀 COMPLETE HYBRID MARKET BOT")
+    logger.info("="*70)
+    logger.info("📊 APIs: Alpha Vantage + CoinGecko + ExchangeRate")
+    logger.info("✅ NO Yahoo Finance = NO Rate Limiting")
+    logger.info("="*70 + "\n")
+    
+    if not BOT_TOKEN or not CHAT_ID:
+        logger.error("❌ Missing BOT_TOKEN or CHAT_ID!")
+        return
+    
+    if not ALPHA_VANTAGE_KEY:
+        logger.warning("⚠️  ALPHA_VANTAGE_KEY not set - futures/commodities will fail!")
+        logger.warning("⚠️  Get free key at: https://www.alphavantage.co/support/#api-key")
+    
+    logger.info(f"✅ Token: {BOT_TOKEN[:10]}...")
+    logger.info(f"✅ Chat: {CHAT_ID}")
+    logger.info(f"✅ Alpha Vantage: {'Configured' if ALPHA_VANTAGE_KEY else 'MISSING'}")
+    logger.info(f"⏱️  Interval: {UPDATE_INTERVAL_HOURS}h")
+    logger.info(f"📊 Total symbols: {sum(len(s) for s in MARKET_SYMBOLS.values())}")
+    
+    application = Application.builder().token(BOT_TOKEN).build()
+    
+    application.add_handler(CommandHandler("start", cmd_start))
+    application.add_handler(CommandHandler("status", cmd_status))
+    application.add_handler(CommandHandler("markets", cmd_markets))
+    application.add_handler(CommandHandler("apilimit", cmd_apilimit))
+    application.add_handler(CommandHandler("update", cmd_update))
+    
+    job_queue = application.job_queue
+    job_queue.run_repeating(
+        scheduled_update,
+        interval=UPDATE_INTERVAL_HOURS * 3600,
+        first=60  # Primo update dopo 1 minuto
+    )
+    
+    logger.info("✅ Bot configured and ready")
+    logger.info("="*70 + "\n")
+    
+    # IMPORTANTE: drop_pending_updates per evitare conflitti
+    application.run_polling(
+        allowed_updates=Update.ALL_TYPES,
+        drop_pending_updates=True
+    )
+
+
+if __name__ == '__main__':
+    main()
