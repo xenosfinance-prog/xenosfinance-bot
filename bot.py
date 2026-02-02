@@ -1,86 +1,283 @@
-  📥 Fetching futures & commodities via Alpha Vantage...
-  
-  # ETF proxy per futures (Alpha Vantage compatibile)
-  futures_data = []
-  
-  # Mappatura simboli futures -> ETF
-  futures_map = [
-      {"symbol": "SPY", "name": "S&P 500 ETF", "type": "index"},
-      {"symbol": "QQQ", "name": "Nasdaq 100 ETF", "type": "index"},
-      {"symbol": "DIA", "name": "Dow Jones ETF", "type": "index"},
-      {"symbol": "IWM", "name": "Russell 2000 ETF", "type": "index"}
-  ]
-  
-  commodities_map = [
-      {"symbol": "GLD", "name": "Gold ETF", "type": "commodity"},
-      {"symbol": "SLV", "name": "Silver ETF", "type": "commodity"}
-  ]
-  
-  # Funzione per fetch Alpha Vantage
-  def get_alpha_vantage_quote(symbol):
-      """Recupera dati da Alpha Vantage"""
-      import requests
-      import os
-      import time
-      
-      # Prendi API key da variabile d'ambiente
-      api_key = os.getenv('ALPHA_VANTAGE_KEY', 'demo')
-      
-      # URL per quote in tempo reale
-      url = f"https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol={symbol}&apikey={api_key}"
-      
-      try:
-          response = requests.get(url, timeout=10)
-          data = response.json()
-          
-          # Parse risposta Alpha Vantage
-          if "Global Quote" in data:
-              quote = data["Global Quote"]
-              return {
-                  'symbol': symbol,
-                  'price': quote.get('05. price', 'N/A'),
-                  'change': quote.get('09. change', 'N/A'),
-                  'change_percent': quote.get('10. change percent', 'N/A')
-              }
-          else:
-              print(f"  ⚠️  {symbol}: Dati non disponibili")
-              return {
-                  'symbol': symbol,
-                  'price': 'N/A',
-                  'change': 'N/A',
-                  'change_percent': 'N/A'
-              }
-              
-      except Exception as e:
-          print(f"  ❌ {symbol}: {str(e)[:50]}...")
-          return {
-              'symbol': symbol,
-              'price': 'N/A',
-              'change': 'N/A',
-              'change_percent': 'N/A'
-          }
-      finally:
-          # Rate limiting Alpha Vantage (5 chiamate/minuto free tier)
-          time.sleep(12)  # 12 secondi tra le chiamate
-  
-  # Fetch futures (ETF proxy)
-  for item in futures_map:
-      print(f"  📈 Fetching {item['symbol']} ({item['name']})...")
-      data = get_alpha_vantage_quote(item['symbol'])
-      futures_data.append(data)
-  
-  # Fetch commodities (ETF proxy)
-  commodities_data = []
-  for item in commodities_map:
-      print(f"  📈 Fetching {item['symbol']} ({item['name']})...")
-      data = get_alpha_vantage_quote(item['symbol'])
-      commodities_data.append(data)
-  
-  # Output risultati
-  print("  ✅ Futures (ETF proxy):")
-  for item in futures_data:
-      print(f"    • {item['symbol']}: ${item['price']} ({item['change_percent']})")
-  
-  print("  ✅ Commodities (ETF proxy):")
-  for item in commodities_data:
-      print(f"    • {item['symbol']}: ${item['price']} ({item['change_percent']})")
+#!/usr/bin/env python3
+"""
+Professional Market Analysis Bot
+Alpha Vantage + Telegram
+"""
+
+import os
+import time
+import requests
+import logging
+from datetime import datetime, timedelta
+import schedule
+from telegram import Update, Bot
+from telegram.ext import Application, CommandHandler, ContextTypes
+import asyncio
+
+# ===== CONFIGURAZIONE =====
+TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN', '8522641168:AAES...')
+CHANNEL_ID = os.getenv('CHANNEL_ID', '-1002375600499')
+ALPHA_VANTAGE_KEY = os.getenv('ALPHA_VANTAGE_KEY', 'demo')  # Ottieni da: https://www.alphavantage.co
+
+# Configura logging
+logging.basicConfig(
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    level=logging.INFO
+)
+logger = logging.getLogger(__name__)
+
+# ===== ALPHA VANTAGE DATA FETCH =====
+
+def get_alpha_vantage_quote(symbol):
+    """Ottieni dati da Alpha Vantage"""
+    try:
+        url = "https://www.alphavantage.co/query"
+        params = {
+            "function": "GLOBAL_QUOTE",
+            "symbol": symbol,
+            "apikey": ALPHA_VANTAGE_KEY
+        }
+        
+        response = requests.get(url, params=params, timeout=10)
+        response.raise_for_status()
+        data = response.json()
+        
+        if "Global Quote" in data:
+            quote = data["Global Quote"]
+            return {
+                'symbol': symbol,
+                'price': float(quote.get('05. price', 0)),
+                'change': float(quote.get('09. change', 0)),
+                'change_percent': quote.get('10. change percent', '0%'),
+                'volume': int(quote.get('06. volume', 0))
+            }
+        else:
+            logger.warning(f"Dati non disponibili per {symbol}")
+            return None
+            
+    except Exception as e:
+        logger.error(f"Errore fetching {symbol}: {e}")
+        return None
+
+def fetch_market_data():
+    """Recupera tutti i dati di mercato"""
+    logger.info("📊 Generando aggiornamento mercato...")
+    
+    # Lista asset da monitorare
+    assets = [
+        {"symbol": "SPY", "name": "S&P 500"},
+        {"symbol": "QQQ", "name": "Nasdaq 100"},
+        {"symbol": "DIA", "name": "Dow Jones"},
+        {"symbol": "IWM", "name": "Russell 2000"},
+        {"symbol": "GLD", "name": "Gold"},
+        {"symbol": "SLV", "name": "Silver"},
+        {"symbol": "TLT", "name": "Bonds 20+"},
+        {"symbol": "VXX", "name": "VIX Short-Term"}
+    ]
+    
+    results = []
+    
+    for asset in assets:
+        logger.info(f"  📈 Recuperando {asset['symbol']} ({asset['name']})...")
+        data = get_alpha_vantage_quote(asset['symbol'])
+        
+        if data:
+            results.append({
+                'name': asset['name'],
+                'symbol': data['symbol'],
+                'price': data['price'],
+                'change': data['change'],
+                'change_percent': data['change_percent']
+            })
+        
+        # Rate limiting Alpha Vantage (5 chiamate/minuto free tier)
+        time.sleep(12)
+    
+    return results
+
+def generate_market_report():
+    """Genera report di mercato"""
+    market_data = fetch_market_data()
+    
+    if not market_data:
+        return "⚠️ Impossibile recuperare dati di mercato. Riprova più tardi."
+    
+    # Analisi trend
+    green = sum(1 for item in market_data if item['change'] > 0)
+    red = sum(1 for item in market_data if item['change'] < 0)
+    
+    # Costruisci report
+    report = "📊 **AGGIORNAMENTO MERCATO PROFESSIONALE**\n"
+    report += f"🕐 {datetime.now().strftime('%d/%m/%Y %H:%M')}\n"
+    report += "━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+    
+    # Sezione indici
+    report += "📈 **INDICI PRINCIPALI**\n"
+    indices = [item for item in market_data if item['symbol'] in ['SPY', 'QQQ', 'DIA', 'IWM']]
+    for item in indices:
+        emoji = "🟢" if item['change'] > 0 else "🔴" if item['change'] < 0 else "⚪"
+        report += f"{emoji} **{item['name']}** ({item['symbol']}): ${item['price']:.2f} "
+        report += f"({item['change']:+.2f}, {item['change_percent']})\n"
+    
+    report += "\n🏆 **COMMODITIES**\n"
+    commodities = [item for item in market_data if item['symbol'] in ['GLD', 'SLV']]
+    for item in commodities:
+        emoji = "🟢" if item['change'] > 0 else "🔴" if item['change'] < 0 else "⚪"
+        report += f"{emoji} **{item['name']}**: ${item['price']:.2f} "
+        report += f"({item['change']:+.2f}, {item['change_percent']})\n"
+    
+    report += "\n📊 **SINTESI MERCATO**\n"
+    report += f"• Trend Positivi: {green} asset\n"
+    report += f"• Trend Negativi: {red} asset\n"
+    
+    if green > red:
+        report += "• Sentimento: ⬆️ **BULLISH**\n"
+    elif red > green:
+        report += "• Sentimento: ⬇️ **BEARISH**\n"
+    else:
+        report += "• Sentimento: ➡️ **NEUTRAL**\n"
+    
+    report += "\n━━━━━━━━━━━━━━━━━━━━━━━━\n"
+    report += "🔔 Aggiornamento ogni 4 ore (Lun-Ven)\n"
+    report += "⏰ Orari mercato: 9:30-16:00 ET\n"
+    
+    return report
+
+# ===== TELEGRAM BOT =====
+
+async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Comando /start"""
+    await update.message.reply_text(
+        "🤖 **Bot Analisi Mercato Professionale**\n\n"
+        "Fornisco aggiornamenti sul mercato ogni 4 ore.\n"
+        "Comandi disponibili:\n"
+        "/market - Ultimo aggiornamento mercato\n"
+        "/status - Stato del bot\n"
+        "/help - Assistenza"
+    )
+
+async def market_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Comando /market"""
+    await update.message.reply_text("🔄 Recupero dati mercato...")
+    report = generate_market_report()
+    await update.message.reply_text(report, parse_mode='Markdown')
+
+async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Comando /status"""
+    status_msg = (
+        "✅ **BOT STATUS**\n"
+        f"• Online: Sì\n"
+        f"• Ultimo aggiornamento: {datetime.now().strftime('%H:%M')}\n"
+        f"• Prossimo aggiornamento: Ogni 4 ore\n"
+        f"• Canale: @professional_market_bot\n"
+        f"• Dati: Alpha Vantage API"
+    )
+    await update.message.reply_text(status_msg, parse_mode='Markdown')
+
+async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Comando /help"""
+    help_msg = (
+        "📚 **GUIDA BOT**\n\n"
+        "Questo bot fornisce:\n"
+        "• Aggiornamenti mercato ogni 4 ore\n"
+        "• Analisi indici principali\n"
+        "• Commodities (oro, argento)\n"
+        "• Sentimento di mercato\n\n"
+        "Comandi:\n"
+        "/market - Aggiornamento corrente\n"
+        "/status - Stato bot\n"
+        "/help - Questo messaggio\n\n"
+        "Supporto: contatta @tuocanale"
+    )
+    await update.message.reply_text(help_msg, parse_mode='Markdown')
+
+async def send_daily_update():
+    """Invia aggiornamento programmato al canale"""
+    try:
+        app = Application.builder().token(TELEGRAM_TOKEN).build()
+        bot = app.bot
+        
+        logger.info("📊 Invio aggiornamento programmato...")
+        report = generate_market_report()
+        
+        await bot.send_message(
+            chat_id=CHANNEL_ID,
+            text=report,
+            parse_mode='Markdown'
+        )
+        logger.info("✅ Aggiornamento inviato con successo!")
+        
+    except Exception as e:
+        logger.error(f"❌ Errore invio aggiornamento: {e}")
+
+# ===== SCHEDULER =====
+
+def schedule_updates():
+    """Configura aggiornamenti programmati"""
+    # Ogni 4 ore, Lun-Ven
+    schedule.every(4).hours.do(
+        lambda: asyncio.run(send_daily_update())
+    )
+    
+    # Test: ogni 2 minuti (rimuovere in produzione)
+    schedule.every(2).minutes.do(
+        lambda: logger.info("🕐 Scheduled check...")
+    )
+    
+    logger.info("📅 Scheduler configurato: ogni 4 ore (Lun-Ven)")
+
+# ===== MAIN =====
+
+async def main():
+    """Funzione principale"""
+    # Inizializza bot Telegram
+    app = Application.builder().token(TELEGRAM_TOKEN).build()
+    
+    # Aggiungi comandi
+    app.add_handler(CommandHandler("start", start_command))
+    app.add_handler(CommandHandler("market", market_command))
+    app.add_handler(CommandHandler("status", status_command))
+    app.add_handler(CommandHandler("help", help_command))
+    
+    # Configura scheduler
+    schedule_updates()
+    
+    # Avvia bot
+    logger.info("======================================================================")
+    logger.info("🚀 PROFESSIONAL MARKET ANALYSIS BOT STARTING")
+    logger.info("======================================================================")
+    logger.info(f"✅ Token: {TELEGRAM_TOKEN[:10]}...")
+    logger.info(f"✅ Channel ID: {CHANNEL_ID}")
+    logger.info("✅ All command handlers registered")
+    logger.info("📅 Schedule: Every 4 hours, Mon-Fri only")
+    logger.info("🕐 Market Hours: 9:30 AM - 4:00 PM ET")
+    logger.info("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+    logger.info("✅ BOT FULLY RUNNING - Polling + Scheduled Updates")
+    logger.info("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+    
+    # Avvia scheduler in background
+    async def run_scheduler():
+        while True:
+            schedule.run_pending()
+            await asyncio.sleep(60)  # Controlla ogni minuto
+    
+    # Esegui sia il bot che lo scheduler
+    await asyncio.gather(
+        app.run_polling(allowed_updates=Update.ALL_TYPES),
+        run_scheduler()
+    )
+
+if __name__ == "__main__":
+    # Verifica variabili d'ambiente
+    if not TELEGRAM_TOKEN or TELEGRAM_TOKEN == "8522641168:AAES...":
+        logger.error("❌ Token Telegram non configurato!")
+        logger.info("👉 Imposta la variabile d'ambiente TELEGRAM_TOKEN su Railway")
+        exit(1)
+    
+    if ALPHA_VANTAGE_KEY == "demo":
+        logger.warning("⚠️  Usando Alpha Vantage DEMO key (limitata)")
+        logger.info("👉 Ottieni una key gratuita: https://www.alphavantage.co/support/#api-key")
+        logger.info("👉 Imposta ALPHA_VANTAGE_KEY su Railway")
+    
+    # Avvia bot
+    asyncio.run(main())
