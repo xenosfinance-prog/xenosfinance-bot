@@ -2,22 +2,22 @@
 """
 Professional Market Analysis Bot
 Alpha Vantage + Telegram
+Senza dipendenze schedule
 """
 
 import os
 import time
 import requests
 import logging
-from datetime import datetime, timedelta
-import schedule
-from telegram import Update, Bot
-from telegram.ext import Application, CommandHandler, ContextTypes
 import asyncio
+from datetime import datetime, timedelta
+from telegram import Update
+from telegram.ext import Application, CommandHandler, ContextTypes
 
 # ===== CONFIGURAZIONE =====
 TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN', '8522641168:AAES...')
 CHANNEL_ID = os.getenv('CHANNEL_ID', '-1002375600499')
-ALPHA_VANTAGE_KEY = os.getenv('ALPHA_VANTAGE_KEY', 'demo')  # Ottieni da: https://www.alphavantage.co
+ALPHA_VANTAGE_KEY = os.getenv('ALPHA_VANTAGE_KEY', 'demo')
 
 # Configura logging
 logging.basicConfig(
@@ -44,12 +44,15 @@ def get_alpha_vantage_quote(symbol):
         
         if "Global Quote" in data:
             quote = data["Global Quote"]
+            price_str = quote.get('05. price', '0')
+            change_str = quote.get('09. change', '0')
+            
             return {
                 'symbol': symbol,
-                'price': float(quote.get('05. price', 0)),
-                'change': float(quote.get('09. change', 0)),
+                'price': float(price_str) if price_str.replace('.', '', 1).isdigit() else 0,
+                'change': float(change_str) if change_str.replace('.', '', 1).lstrip('-').isdigit() else 0,
                 'change_percent': quote.get('10. change percent', '0%'),
-                'volume': int(quote.get('06. volume', 0))
+                'volume': quote.get('06. volume', '0')
             }
         else:
             logger.warning(f"Dati non disponibili per {symbol}")
@@ -191,42 +194,38 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     await update.message.reply_text(help_msg, parse_mode='Markdown')
 
-async def send_daily_update():
-    """Invia aggiornamento programmato al canale"""
-    try:
-        app = Application.builder().token(TELEGRAM_TOKEN).build()
-        bot = app.bot
-        
-        logger.info("📊 Invio aggiornamento programmato...")
-        report = generate_market_report()
-        
-        await bot.send_message(
-            chat_id=CHANNEL_ID,
-            text=report,
-            parse_mode='Markdown'
-        )
-        logger.info("✅ Aggiornamento inviato con successo!")
-        
-    except Exception as e:
-        logger.error(f"❌ Errore invio aggiornamento: {e}")
-
-# ===== SCHEDULER =====
-
-def schedule_updates():
-    """Configura aggiornamenti programmati"""
-    # Ogni 4 ore, Lun-Ven
-    schedule.every(4).hours.do(
-        lambda: asyncio.run(send_daily_update())
-    )
+async def scheduled_updates():
+    """Gestisce aggiornamenti programmati"""
+    logger.info("📅 Scheduler iniziato: ogni 4 ore (Lun-Ven)")
     
-    # Test: ogni 2 minuti (rimuovere in produzione)
-    schedule.every(2).minutes.do(
-        lambda: logger.info("🕐 Scheduled check...")
-    )
-    
-    logger.info("📅 Scheduler configurato: ogni 4 ore (Lun-Ven)")
-
-# ===== MAIN =====
+    while True:
+        now = datetime.now()
+        
+        # Controlla se è giorno lavorativo (Lun-Ven)
+        if now.weekday() < 5:  # 0=Lun, 4=Ven
+            # Controlla se è ora di inviare (ogni 4 ore)
+            current_hour = now.hour
+            
+            if current_hour % 4 == 0 and now.minute < 5:  # Invia all'ora precisa
+                try:
+                    logger.info("📊 Invio aggiornamento programmato...")
+                    report = generate_market_report()
+                    
+                    app = Application.builder().token(TELEGRAM_TOKEN).build()
+                    bot = app.bot
+                    
+                    await bot.send_message(
+                        chat_id=CHANNEL_ID,
+                        text=report,
+                        parse_mode='Markdown'
+                    )
+                    logger.info("✅ Aggiornamento inviato con successo!")
+                    
+                except Exception as e:
+                    logger.error(f"❌ Errore invio aggiornamento: {e}")
+        
+        # Attendi 1 minuto prima di controllare di nuovo
+        await asyncio.sleep(60)
 
 async def main():
     """Funzione principale"""
@@ -238,9 +237,6 @@ async def main():
     app.add_handler(CommandHandler("market", market_command))
     app.add_handler(CommandHandler("status", status_command))
     app.add_handler(CommandHandler("help", help_command))
-    
-    # Configura scheduler
-    schedule_updates()
     
     # Avvia bot
     logger.info("======================================================================")
@@ -255,17 +251,17 @@ async def main():
     logger.info("✅ BOT FULLY RUNNING - Polling + Scheduled Updates")
     logger.info("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
     
-    # Avvia scheduler in background
-    async def run_scheduler():
-        while True:
-            schedule.run_pending()
-            await asyncio.sleep(60)  # Controlla ogni minuto
-    
-    # Esegui sia il bot che lo scheduler
-    await asyncio.gather(
-        app.run_polling(allowed_updates=Update.ALL_TYPES),
-        run_scheduler()
+    # Crea task per polling e scheduler
+    polling_task = asyncio.create_task(
+        app.run_polling(allowed_updates=Update.ALL_TYPES)
     )
+    
+    scheduler_task = asyncio.create_task(
+        scheduled_updates()
+    )
+    
+    # Esegui entrambi i task
+    await asyncio.gather(polling_task, scheduler_task)
 
 if __name__ == "__main__":
     # Verifica variabili d'ambiente
@@ -280,4 +276,7 @@ if __name__ == "__main__":
         logger.info("👉 Imposta ALPHA_VANTAGE_KEY su Railway")
     
     # Avvia bot
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        logger.info("👋 Bot fermato dall'utente")
